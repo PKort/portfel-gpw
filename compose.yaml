@@ -1,0 +1,12 @@
+services:
+  portfel-gpw:
+    build: .
+    container_name: portfel-gpw
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - portfel-data:/app/data
+
+volumes:
+  portfel-data:

@@ -1,0 +1,14 @@
+---
+description: Architektura i zasady rozwoju aplikacji Portfel GPW
+alwaysApply: true
+---
+
+# Portfel GPW
+
+- Zachowaj aplikację jako lekki serwer Node.js bez frameworka, dopóki wymagania nie uzasadnią migracji.
+- Dane trwałe zapisuj w SQLite przez wbudowany moduł `node:sqlite`; nie wracaj do `localStorage`.
+- Zmiany modelu transakcji wprowadzaj przez bezpieczne migracje bazy.
+- Logikę finansową utrzymuj jako czyste funkcje w `portfolio.js` i dodawaj przypadki do `portfolio.test.mjs`.
+- Przy zmianach obliczeń uwzględniaj prowizje oraz FIFO.
+- Po zmianie uruchom `npm test` oraz sprawdzenie składni zmodyfikowanych plików JavaScript.
+- Kontener musi działać bez uprawnień roota, a dane mają pozostać w wolumenie `/app/data`.

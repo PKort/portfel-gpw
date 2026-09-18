@@ -1,0 +1,6 @@
+{
+  "name": "portfel-gpw",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node portfolio.test.mjs", "start": "node server.js" }
+}
