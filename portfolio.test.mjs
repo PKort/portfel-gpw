@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { calculatePortfolio } from "./portfolio.js";
+import { calculatePortfolio, calculatePortfolioDetails } from "./portfolio.js";
 
 const tx = [
   { date: "2026-01-01", createdAt: 1, ticker: "PKO", type: "BUY", quantity: 10, price: 100, fee: 5 },
@@ -14,4 +14,80 @@ assert.equal(position.marketValue, 1000);
 assert.equal(position.unrealized, 36);
 assert.equal(position.realized, 308);
 assert.throws(() => calculatePortfolio([...tx, { date: "2026-04-01", createdAt: 4, ticker: "PKO", type: "SELL", quantity: 9, price: 130, fee: 0 }]));
-console.log("Testy obliczeń FIFO: OK");
+// Multiple purchases and sales of one ticker remain a single portfolio position.
+const grouped = calculatePortfolio([
+  ...tx,
+  { date: "2026-04-01", createdAt: 4, ticker: "pko", type: "BUY", quantity: 2, price: 110, fee: 0 },
+  { date: "2026-04-01", createdAt: 5, ticker: "CDR", type: "BUY", quantity: 3, price: 200, fee: 0 },
+], { PKO: 125, CDR: 210 });
+assert.deepEqual(grouped.map(item => item.ticker), ["CDR", "PKO"]);
+assert.equal(grouped[1].quantity, 10);
+assert.equal(grouped[1].cost, 1184);
+assert.equal(grouped[1].marketValue, 1250);
+assert.equal(grouped[1].realized, 308);
+console.log("Testy obliczeń FIFO i grupowania po tickerze: OK");
+
+const history = tx.map((item, index) => ({ ...item, id: `tx-${index}` }));
+const snapshot = JSON.stringify(history);
+const details = calculatePortfolioDetails(history);
+assert.deepEqual(details.positions, calculatePortfolio(history));
+assert.equal(details.saleResults.size, 1);
+assert.deepEqual(details.saleResults.get("tx-2"), { method: "FIFO", averageAcquisitionCost: 1246 / 12, profit: 308 });
+assert.equal(details.saleResults.has("tx-0"), false);
+assert.equal(JSON.stringify(history), snapshot);
+
+const laterHistory = [
+  ...history,
+  { id: "loss", date: "2026-03-01", createdAt: 4, ticker: "pko", type: "SELL", quantity: 2, price: 110, fee: 1 },
+  { id: "later-buy", date: "2026-03-01", createdAt: 5, ticker: "PKO", type: "BUY", quantity: 2, price: 200, fee: 0 },
+  { id: "close", date: "2026-04-01", createdAt: 6, ticker: "PKO", type: "SELL", quantity: 8, price: 150, fee: 2 },
+  { id: "reopen", date: "2026-05-01", createdAt: 7, ticker: "PKO", type: "BUY", quantity: 2, price: 32.855, fee: 0 },
+  { id: "zero", date: "2026-05-02", createdAt: 8, ticker: "PKO", type: "SELL", quantity: 2, price: 32.855, fee: 0 },
+  { id: "other-buy", date: "2026-01-01", createdAt: 9, ticker: "CDR", type: "BUY", quantity: 0.5, price: 10, fee: 1 },
+  { id: "other-sell", date: "2026-02-01", createdAt: 10, ticker: "CDR", type: "SELL", quantity: 0.25, price: 16, fee: 0.5 },
+];
+const results = calculatePortfolioDetails([...laterHistory].reverse()).saleResults;
+assert.deepEqual(results.get("tx-2"), details.saleResults.get("tx-2"));
+assert.deepEqual(results.get("loss"), { method: "FIFO", averageAcquisitionCost: 120.5, profit: -22 });
+assert.deepEqual(results.get("close"), { method: "FIFO", averageAcquisitionCost: 140.375, profit: 75 });
+assert.deepEqual(results.get("zero"), { method: "FIFO", averageAcquisitionCost: 32.855, profit: 0 });
+assert.deepEqual(results.get("other-sell"), { method: "FIFO", averageAcquisitionCost: 12, profit: 0.5 });
+const editedHistory = history.map(item => item.id === "tx-0" ? { ...item, price: 90 } : item);
+assert.equal(calculatePortfolioDetails(editedHistory).saleResults.get("tx-2").profit, 408);
+const avp = calculatePortfolioDetails(history, { PKO: 125 }, "AVP");
+assert.deepEqual(avp.saleResults.get("tx-2"), { method: "AVP", averageAcquisitionCost: 110.5, profit: 228 });
+assert.equal(avp.positions[0].cost, 884);
+assert.equal(avp.positions[0].realized, 228);
+assert.equal(avp.positions[0].unrealized, 116);
+const avpLater = calculatePortfolioDetails(laterHistory, {}, "AVP");
+assert.equal(avpLater.saleResults.get("loss").profit, -2);
+assert.equal(avpLater.saleResults.get("close").profit, 135);
+assert.equal(avpLater.saleResults.get("zero").profit, 0);
+
+// Explicit per-sale methods override the default in both directions.
+const forceFIFO = history.map(item => item.type === "SELL" ? { ...item, costMethod: "FIFO" } : item);
+assert.deepEqual(calculatePortfolioDetails(forceFIFO, {}, "AVP"), details);
+const forceAVP = history.map(item => item.type === "SELL" ? { ...item, costMethod: "AVP" } : item);
+assert.deepEqual(calculatePortfolioDetails(forceAVP, { PKO: 125 }), avp);
+const inherit = forceAVP.map(item => ({ ...item, costMethod: null }));
+assert.deepEqual(calculatePortfolioDetails(inherit), details);
+
+const mixed = laterHistory.map(item => item.id === "tx-2" ? { ...item, costMethod: "AVP" } : item);
+const mixedDetails = calculatePortfolioDetails(mixed);
+assert.equal(mixedDetails.saleResults.get("loss").method, "FIFO");
+assert.equal(mixedDetails.saleResults.get("loss").profit, -2);
+assert.equal(mixedDetails.saleResults.get("close").profit, 135);
+for (const method of ["FIFO", "AVP"]) {
+  for (const rows of [history, laterHistory, mixed]) {
+    const result = calculatePortfolioDetails(rows, { PKO: 125, CDR: 20 }, method);
+    const sum = [...result.saleResults.values()].reduce((total, sale) => total + sale.profit, 0);
+    assert.ok(Math.abs(sum - result.positions.reduce((total, position) => total + position.realized, 0)) < 1e-9);
+    const buys = rows.filter(item => item.type === "BUY").reduce((total, item) => total + item.quantity * item.price + item.fee, 0);
+    const sales = rows.filter(item => item.type === "SELL").reduce((total, item) => total + item.quantity * item.price - item.fee, 0);
+    assert.ok(Math.abs(buys - (sales - sum) - result.positions.reduce((total, position) => total + position.cost, 0)) < 1e-9);
+  }
+  assert.throws(() => calculatePortfolioDetails([{ ...history[2], quantity: 1 }], {}, method), /dostępne/);
+}
+assert.throws(() => calculatePortfolioDetails(history, {}, "INVALID"));
+assert.throws(() => calculatePortfolioDetails(history.map(item => ({ ...item, costMethod: "INVALID" }))));
+console.log("Testy wyników FIFO/AVP, nadpisania metody i zgodności podsumowania: OK");

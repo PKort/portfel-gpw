@@ -1,4 +1,10 @@
-export function calculatePortfolio(transactions, quotes = {}) {
+export function calculatePortfolio(transactions, quotes = {}, defaultMethod = "FIFO") {
+  return calculatePortfolioDetails(transactions, quotes, defaultMethod).positions;
+}
+
+export function calculatePortfolioDetails(transactions, quotes = {}, defaultMethod = "FIFO") {
+  if (!["FIFO", "AVP"].includes(defaultMethod)) throw new Error("Nieprawidłowa metoda wyceny.");
+  const saleResults = new Map();
   const lots = new Map();
   const realizedByTicker = new Map();
   const ordered = [...transactions].sort((a, b) =>
@@ -23,17 +29,28 @@ export function calculatePortfolio(transactions, quotes = {}) {
       throw new Error(`Sprzedaż ${ticker}: dostępne ${formatQuantity(owned)}, próba sprzedaży ${formatQuantity(transaction.quantity)}.`);
     }
 
-    let remaining = transaction.quantity;
+    const method = transaction.costMethod ?? defaultMethod;
+    if (!["FIFO", "AVP"].includes(method)) throw new Error("Nieprawidłowa metoda wyceny.");
+    const averageAcquisitionCost = owned ? tickerLots.reduce((sum, lot) => sum + lot.quantity * lot.unitCost, 0) / owned : 0;
     let cost = 0;
-    while (remaining > 1e-9) {
-      const lot = tickerLots[0];
-      const used = Math.min(remaining, lot.quantity);
-      cost += used * lot.unitCost;
-      lot.quantity -= used;
-      remaining -= used;
-      if (lot.quantity <= 1e-9) tickerLots.shift();
+    if (method === "AVP") {
+      cost = averageAcquisitionCost * transaction.quantity;
+      // AVP pools the remaining shares at their weighted acquisition cost.
+      tickerLots.length = 0;
+      if (owned - transaction.quantity > 1e-9) tickerLots.push({ quantity: owned - transaction.quantity, unitCost: averageAcquisitionCost });
+    } else {
+      let remaining = transaction.quantity;
+      while (remaining > 1e-9) {
+        const lot = tickerLots[0];
+        const used = Math.min(remaining, lot.quantity);
+        cost += used * lot.unitCost;
+        lot.quantity -= used;
+        remaining -= used;
+        if (lot.quantity <= 1e-9) tickerLots.shift();
+      }
     }
     const proceeds = transaction.quantity * transaction.price - transaction.fee;
+    saleResults.set(transaction.id, { method, averageAcquisitionCost: cost / transaction.quantity, profit: proceeds - cost });
     realizedByTicker.set(ticker, (realizedByTicker.get(ticker) ?? 0) + proceeds - cost);
   }
 
@@ -56,7 +73,7 @@ export function calculatePortfolio(transactions, quotes = {}) {
     };
   });
 
-  return positions.sort((a, b) => a.ticker.localeCompare(b.ticker));
+  return { positions: positions.sort((a, b) => a.ticker.localeCompare(b.ticker)), saleResults };
 }
 
 export function formatQuantity(value) {

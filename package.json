@@ -2,5 +2,5 @@
   "name": "portfel-gpw",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node portfolio.test.mjs", "start": "node server.js" }
+  "scripts": { "test": "node portfolio.test.mjs && node theme.test.mjs && node assets.test.mjs && node settings.test.mjs", "test:api": "node server.test.mjs", "start": "node server.js" }
 }
