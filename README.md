@@ -2,6 +2,8 @@
 
 Aplikacja webowa do zapisywania transakcji na GPW i liczenia wyniku metodą FIFO lub AVP. Działa jako kontener, a dane przechowuje w bazie SQLite na trwałym wolumenie.
 
+Aplikacja powstała z pomocą AI. Kod jest udostępniony na licencji MIT — zobacz [LICENSE](LICENSE).
+
 ## Uruchomienie lokalne
 
 Wymagany jest Node.js 24 lub nowszy:
