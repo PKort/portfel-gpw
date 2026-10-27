@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { calculatePortfolio, calculatePortfolioDetails } from "./portfolio.js";
+import { calculatePortfolio, calculatePortfolioDetails, transactionCashCents, calculateOperationHistory, calculateTotalReturn } from "./portfolio.js";
 
 const tx = [
   { date: "2026-01-01", createdAt: 1, ticker: "PKO", type: "BUY", quantity: 10, price: 100, fee: 5 },
@@ -91,3 +91,41 @@ for (const method of ["FIFO", "AVP"]) {
 assert.throws(() => calculatePortfolioDetails(history, {}, "INVALID"));
 assert.throws(() => calculatePortfolioDetails(history.map(item => ({ ...item, costMethod: "INVALID" }))));
 console.log("Testy wyników FIFO/AVP, nadpisania metody i zgodności podsumowania: OK");
+
+assert.equal(transactionCashCents({ type: "BUY", quantity: 2, price: 100, fee: 5 }), -20500);
+assert.equal(transactionCashCents({ type: "SELL", quantity: 2, price: 120, fee: 3 }), 23700);
+assert.equal(transactionCashCents({ type: "BUY", quantity: 1, price: 1.005, fee: 0 }), -101);
+assert.equal(transactionCashCents({ type: "SELL", quantity: 1, price: 0, fee: 3 }), -300);
+
+const historyTrades = [
+  { id: "b", type: "BUY", date: "2026-01-02", createdAt: 2, quantity: 2, price: 100, fee: 5 },
+  { id: "s", type: "SELL", date: "2026-01-03", createdAt: 3, quantity: 1, price: 120, fee: 3 },
+];
+const historyCash = [
+  { id: 1, type: "DEPOSIT", date: "2026-01-01", createdAt: 10, amount: 1000 },
+  { id: 1, type: "DIVIDEND", date: "2026-01-03", createdAt: 4, amount: 81.25 },
+  { id: 1, type: "WITHDRAWAL", date: "2026-01-04", createdAt: 5, amount: 100 },
+];
+const combined = calculateOperationHistory(historyTrades, historyCash, 943.25); // Opening balance 50.
+assert.deepEqual(combined.map(item => item.type), ["WITHDRAWAL", "DIVIDEND", "SELL", "BUY", "DEPOSIT"]);
+assert.deepEqual(combined.map(item => item.cashBalanceAfter), [943.25, 1043.25, 962, 845, 1050]);
+assert.equal(new Set(combined.map(item => item.key)).size, 5);
+assert.deepEqual(calculateOperationHistory([], [], 50), []);
+assert.equal(calculateOperationHistory([historyTrades[0]], [], -205)[0].cashBalanceAfter, -205);
+assert.deepEqual(calculateOperationHistory([...historyTrades].reverse(), [...historyCash].reverse(), 943.25), combined);
+const sameTime = historyCash.map(item => ({ ...item, date: "2026-01-01", createdAt: 1 }));
+assert.deepEqual(calculateOperationHistory([], sameTime, 981.25), calculateOperationHistory([], [...sameTime].reverse(), 981.25));
+assert.equal(historyTrades[0].cashBalanceAfter, undefined);
+assert.deepEqual(calculateOperationHistory([{ ...historyTrades[0], fee: 6 }], historyCash, 725.25).map(item => item.cashBalanceAfter), [725.25, 825.25, 744, 950]);
+console.log("Testy wspólnej historii i salda po operacji: OK");
+
+const returnCash = [{ type: "DEPOSIT", amount: 600 }, { type: "DEPOSIT", amount: 400 }, { type: "DIVIDEND", amount: 100 }, { type: "WITHDRAWAL", amount: 50 }];
+assert.deepEqual(calculateTotalReturn(800, 300, returnCash), { totalDeposits: 1000, returnRate: 0.10000000000000009 });
+assert.equal(calculateTotalReturn(700, 300, returnCash).returnRate, 0);
+assert.ok(Math.abs(calculateTotalReturn(600, 200, returnCash).returnRate + 0.2) < 1e-12);
+assert.equal(calculateTotalReturn(0, 0, returnCash).returnRate, -1);
+assert.equal(calculateTotalReturn(0, -100, returnCash).returnRate, -1.1);
+assert.deepEqual(calculateTotalReturn(800, 300, []), { totalDeposits: 0, returnRate: null });
+assert.equal(calculateTotalReturn(800, 300, [{ type: "DIVIDEND", amount: 100 }]).returnRate, null);
+assert.equal(calculateTotalReturn(0.1, 0.2, [{ type: "DEPOSIT", amount: 0.1 }, { type: "DEPOSIT", amount: 0.2 }]).totalDeposits, 0.3);
+console.log("Testy wyniku całego portfela: wzrost, strata, brak wpłat, dywidendy i wypłaty OK");

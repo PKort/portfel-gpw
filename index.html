@@ -5,18 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Portfel GPW</title>
     <script src="theme.js?v=2"></script>
-    <link rel="stylesheet" href="styles.css?v=4" />
+    <link rel="stylesheet" href="styles.css?v=7" />
   </head>
   <body>
     <main class="shell">
       <header>
         <div class="header-toolbar">
           <p class="eyebrow">Mój portfel</p>
+          <div class="header-controls">
+          <label class="cost-method-control" title="Globalna metoda wyliczania zysku/straty. Metoda wybrana dla pojedynczej sprzedaży ma pierwszeństwo.">Metoda wyniku<select id="global-cost-method" aria-label="Globalna metoda wyliczania zysku i straty"><option value="FIFO">FIFO</option><option value="AVP">AVP</option></select></label>
           <button id="theme-toggle" class="secondary" type="button" aria-label="Włącz ciemny motyw" title="Włącz ciemny motyw">
             <svg class="theme-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.9 13A9 9 0 0 1 11 3.1 9 9 0 1 0 20.9 13Z" /></svg>
             <svg class="theme-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></svg>
           </button>
+          </div>
         </div>
+        <p id="settings-status" role="status"></p>
         <h1>Portfel GPW</h1>
         <p class="subtitle">Transakcje, otwarte pozycje i wynik liczony metodą FIFO lub AVP.</p>
       </header>
@@ -26,40 +30,45 @@
         <button type="button" data-view="assets" class="secondary">Aktywa</button>
       </nav>
       <div id="portfolio-view">
-      <section class="panel" aria-label="Metoda wyceny">
-        <label>Globalna metoda wyliczania zysku/straty<select id="global-cost-method"><option value="FIFO">FIFO — najstarsze zakupy</option><option value="AVP">AVP — średni ważony koszt</option></select></label>
-        <p class="hint">Zmiana przelicza historię i podsumowanie. Metoda ustawiona ręcznie dla sprzedaży ma pierwszeństwo.</p>
-        <p id="settings-status" role="status"></p>
-      </section>
       <section class="summary" aria-label="Podsumowanie portfela">
         <article><span>Wartość pozycji</span><strong id="market-value">0,00 zł</strong></article>
-        <article><span>Koszt otwartych pozycji</span><strong id="open-cost">0,00 zł</strong></article>
+        <article><span>Wynik portfela</span><strong id="total-return">—</strong></article>
+        <article><span>Gotówka</span><strong id="cash-value">0,00 zł</strong></article>
         <article><span>Wynik niezrealizowany</span><strong id="unrealized">0,00 zł</strong></article>
-        <article><span>Wynik zrealizowany</span><strong id="realized">0,00 zł</strong></article>
       </section>
+      <details class="summary-details">
+        <summary><span class="summary-more">Więcej szczegółów</span><span class="summary-less">Mniej szczegółów</span><span class="summary-chevron" aria-hidden="true">⌄</span></summary>
+        <section class="summary" aria-label="Dodatkowe podsumowanie portfela">
+          <article><span>Łączna wartość portfela</span><strong id="portfolio-value">0,00 zł</strong><small class="asset-ticker">Pozycje + gotówka</small></article>
+          <article><span>Suma wpłat</span><strong id="total-deposits">0,00 zł</strong></article>
+          <article><span>Koszt otwartych pozycji</span><strong id="open-cost">0,00 zł</strong></article>
+          <article><span>Wynik zrealizowany</span><strong id="realized">0,00 zł</strong></article>
+        </section>
+      </details>
 
-      <section class="panel">
-        <div class="panel-heading">
-          <div>
-            <p class="eyebrow" id="transaction-mode">Nowy zapis</p>
-            <h2 id="transaction-heading">Dodaj transakcję</h2>
-          </div>
-          <button id="load-demo" class="secondary" type="button">Wczytaj przykład</button>
-        </div>
+      <div class="operations-toolbar">
+        <div><h2>Operacje na rachunku</h2><p class="hint">Akcje i gotówka w jednym miejscu.</p></div>
+        <div class="asset-actions"><button id="load-demo" class="secondary" type="button">Wczytaj przykład</button><button id="new-operation" type="button">+ Dodaj operację</button></div>
+      </div>
+      <dialog id="operation-dialog" aria-labelledby="transaction-heading">
+        <div class="operation-heading"><h2 id="transaction-heading">Dodaj operację</h2><button id="close-operation" class="secondary" type="button">Zamknij</button></div>
+        <p id="transaction-mode" class="eyebrow">Nowy zapis</p>
         <form id="transaction-form">
-          <label>Data<input name="date" type="date" required /></label>
-          <label>Ticker<input name="ticker" maxlength="32" list="asset-options" placeholder="np. PKO" required /></label>
-          <label>Typ<select name="type"><option value="BUY">Kupno</option><option value="SELL">Sprzedaż</option></select></label>
-          <label>Liczba akcji<input name="quantity" type="number" min="0.000001" step="0.000001" required /></label>
-          <label>Cena za akcję<input name="price" type="number" min="0" step="0.001" required /></label>
-          <label>Prowizja<input name="fee" type="number" min="0" step="0.01" value="0" required /></label>
+          <label class="operation-wide">Rodzaj operacji<select name="type"><option value="BUY">Kupno akcji</option><option value="SELL">Sprzedaż akcji</option><option value="DEPOSIT">Zasilenie konta</option><option value="WITHDRAWAL">Wypłata gotówki</option><option value="DIVIDEND">Wypłata dywidendy</option></select></label>
+          <label class="operation-wide">Data operacji<input name="date" type="date" required /></label>
+          <label class="operation-wide" id="operation-asset-field">Aktywo / emitent<input name="ticker" maxlength="32" list="asset-options" placeholder="Wybierz lub wpisz ticker, np. PKO" required /></label>
+          <label data-stock-field>Liczba akcji<input name="quantity" type="number" min="0.000001" step="0.000001" required /></label>
+          <label data-stock-field>Cena za akcję (PLN)<input name="price" type="number" min="0" step="0.001" required /></label>
+          <label data-stock-field>Prowizja (PLN)<input name="fee" type="number" min="0" step="0.01" value="0" required /></label>
           <label id="transaction-cost-method" hidden>Metoda wyliczania wyniku<select name="costMethod"><option value="">Globalna</option><option value="FIFO">FIFO</option><option value="AVP">AVP</option></select></label>
-          <div class="asset-actions"><button type="submit">Dodaj transakcję</button><button id="cancel-transaction" class="secondary" type="button" hidden>Anuluj</button></div>
+          <label class="operation-wide" id="cash-amount-field" hidden>Kwota (PLN)<input name="amount" type="number" min="0.01" step="0.01" required disabled placeholder="0,00" /></label>
+          <p id="operation-effect" class="operation-wide hint" aria-live="polite"></p>
+          <p id="form-error" class="operation-wide error" role="alert"></p>
+          <div class="operation-footer"><button id="cancel-transaction" class="secondary" type="button">Anuluj</button><button type="submit">Zapisz</button></div>
         </form>
-        <p id="form-error" class="error" role="alert"></p>
-      </section>
+      </dialog>
 
-      <section class="panel">
+      <section class="panel positions-panel">
         <div class="panel-heading"><div><p class="eyebrow">Stan na dziś</p><h2>Otwarte pozycje</h2></div></div>
         <div class="table-wrap">
           <table>
@@ -67,27 +76,30 @@
             <tbody id="positions-body"></tbody>
           </table>
         </div>
-        <p class="hint">Kurs można zmienić bezpośrednio w tabeli. W tej wersji ceny zapisują się lokalnie.</p>
+
       </section>
 
       <section class="panel">
         <div class="panel-heading">
-          <div><p class="eyebrow">Historia</p><h2>Transakcje</h2></div>
-          <button id="clear-all" class="danger secondary" type="button">Usuń wszystkie</button>
+          <div><p class="eyebrow">Historia</p><h2>Wszystkie operacje</h2></div>
+          <button id="clear-all" class="danger secondary" type="button">Usuń transakcje akcji</button>
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Data</th><th>Spółka</th><th>Typ</th><th>Liczba</th><th>Cena</th><th>Wartość</th><th>Prowizja</th><th>Metoda</th><th>Zysk/strata</th><th></th></tr></thead>
+            <thead><tr><th>Data</th><th>Aktywo</th><th>Typ</th><th>Liczba</th><th>Cena</th><th>Wartość</th><th>Prowizja</th><th>Metoda</th><th>Zysk/strata</th><th>Saldo gotówki po operacji</th><th></th></tr></thead>
             <tbody id="transactions-body"></tbody>
           </table>
         </div>
+        <p class="hint">Najnowsze operacje są na górze. Saldo liczone jest chronologicznie; dla tego samego dnia według kolejności dodania, a przy jednakowym czasie według identyfikatora operacji. Uwzględnia saldo początkowe i ewentualne ręczne korekty.</p>
         <p class="hint">Wynik sprzedaży uwzględnia prowizje zakupu i sprzedaży. FIFO rozlicza najstarsze zakupy, AVP — średni ważony koszt posiadanych akcji. AVP uśrednia koszt pozostałych akcji; późniejsza sprzedaż FIFO zaczyna od tej uśrednionej partii. Metodę pojedynczej sprzedaży zmienisz przez „Edytuj”.</p>
       </section>
       </div>
       <section id="assets-view" class="panel" hidden aria-labelledby="assets-heading">
         <div class="panel-heading"><div><p class="eyebrow">Słownik portfela</p><h2 id="assets-heading">Aktywa</h2></div><button id="new-asset" type="button">Dodaj aktywo</button></div>
-        <p class="hint">Zmień nazwę widoczną w portfelu i przypisz symbole lub nazwy z innych platform. Aktywa z otwartą pozycją nie można usunąć. Usunięcie pozostałych aktywów usuwa ich definicję i symbole z listy; transakcje i kurs pozostają, a pozycje w portfelu są grupowane po tickerze.</p>
-        <div class="table-wrap"><table class="assets-table"><thead><tr><th>Nazwa</th><th>Ticker</th><th>Symbole platform</th><th>Akcje</th></tr></thead><tbody id="assets-body"></tbody></table></div>
+        <p class="hint">Zmień nazwę widoczną w portfelu i przypisz symbole lub nazwy z innych platform. Archiwizacja zatrzymuje obserwowanie instrumentu i zachowuje jego transakcje, symbole oraz historię cen. Aby przywrócić instrument, dodaj ponownie ten sam ticker.</p>
+        <p class="hint">Wybierz dostawcę i edytuj jego symbol, np. PRA.WA w Yahoo lub PRIME w Bankierze. Zaznacz „Domyślny”, aby używać tego źródła do pobierania kursów, i kliknij „Zapisz”. Domyślny dostawca jest oznaczony gwiazdką na liście. Pod ceną widoczny jest czas notowania.</p>
+        <button id="refresh-quotes" class="secondary" type="button">Pobierz kursy</button><p id="quotes-status" role="status"></p>
+        <div class="table-wrap"><table class="assets-table"><thead><tr><th>Nazwa</th><th>Ticker</th><th>Symbole platform</th><th>Źródło i aliasy kursów</th><th>Akcje</th></tr></thead><tbody id="assets-body"></tbody></table></div>
         <form id="asset-form" hidden>
           <h3 id="asset-editor-heading">Dodaj aktywo</h3>
           <div class="asset-fields">
@@ -103,6 +115,18 @@
       </section>
       <datalist id="asset-options"></datalist>
     </main>
-    <script type="module" src="app.js?v=9"></script>
+    <script type="module">
+      import { removeLegacyWorker } from "./legacy-worker.js";
+      try {
+        if (await removeLegacyWorker(navigator.serviceWorker, document.baseURI)) {
+          location.reload();
+        } else {
+          await import("./app.js?v=15");
+        }
+      } catch (error) {
+        console.error(error);
+        document.querySelector("#form-error").textContent = "Nie udało się uruchomić aplikacji. Odśwież stronę przez Ctrl+F5. Jeśli problem wraca, wyrejestruj Service Workera dla tego adresu.";
+      }
+    </script>
   </body>
 </html>

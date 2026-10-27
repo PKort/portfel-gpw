@@ -1,26 +1,16 @@
-import { calculatePortfolio } from "./portfolio.js";
+import { randomUUID } from "node:crypto";
+import { migrateDatabase } from "./database.js";
 
 export function createAssetStore(db) {
-  db.exec(`
-    PRAGMA foreign_keys = ON;
-    CREATE TABLE IF NOT EXISTS assets (ticker TEXT PRIMARY KEY, name TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS asset_symbols (
-      asset_ticker TEXT NOT NULL REFERENCES assets(ticker) ON UPDATE CASCADE ON DELETE CASCADE,
-      platform TEXT NOT NULL COLLATE NOCASE,
-      symbol TEXT NOT NULL,
-      PRIMARY KEY (asset_ticker, platform),
-      UNIQUE (platform, symbol)
-    );
-    CREATE TABLE IF NOT EXISTS removed_assets (ticker TEXT PRIMARY KEY);
-    INSERT OR IGNORE INTO assets (ticker, name)
-      SELECT ticker, ticker FROM (
-        SELECT ticker FROM transactions UNION SELECT ticker FROM quotes
-      ) WHERE ticker NOT IN (SELECT ticker FROM removed_assets);
-  `);
-  const ensure = (ticker) => db.prepare("INSERT OR IGNORE INTO assets SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM removed_assets WHERE ticker = ?)").run(ticker, ticker, ticker);
-  const list = () => db.prepare("SELECT ticker, name FROM assets ORDER BY name, ticker").all().map(asset => ({
-    ...asset,
-    symbols: db.prepare("SELECT platform, symbol FROM asset_symbols WHERE asset_ticker = ? ORDER BY platform").all(asset.ticker).map(row => ({ ...row })),
+  migrateDatabase(db);
+  const find = ticker => db.prepare("SELECT * FROM assets WHERE ticker = ? AND market = 'XWAR'").get(ticker);
+  const ensure = ticker => {
+    if (!find(ticker)) db.prepare("INSERT INTO assets(id,ticker,name) VALUES (?,?,?)").run(randomUUID(), ticker, ticker);
+    return find(ticker).id;
+  };
+  const list = () => db.prepare("SELECT id, ticker, name FROM assets WHERE archived_at IS NULL ORDER BY name, ticker").all().map(asset => ({
+    ticker: asset.ticker, name: asset.name,
+    symbols: db.prepare("SELECT platform, symbol FROM asset_symbols WHERE asset_id = ? ORDER BY platform").all(asset.id).map(row => ({ ...row })),
   }));
   function save(originalTicker, input) {
     const fail = (message, status = 400) => { throw Object.assign(new Error(message), { status }); };
@@ -36,42 +26,30 @@ export function createAssetStore(db) {
       return { platform, symbol };
     });
     if (new Set(symbols.map(item => item.platform.toLowerCase())).size !== symbols.length) fail("Platforma może wystąpić tylko raz dla danego aktywa.");
-    if (originalTicker && !db.prepare("SELECT 1 FROM assets WHERE ticker = ?").get(originalTicker)) fail("Nie znaleziono aktywa.", 404);
-    if (ticker !== originalTicker && db.prepare("SELECT 1 FROM assets WHERE ticker = ?").get(ticker)) fail("Aktywo o takim tickerze już istnieje.", 409);
+    if (originalTicker && !db.prepare("SELECT 1 FROM assets WHERE ticker = ? AND market = 'XWAR' AND archived_at IS NULL").get(originalTicker)) fail("Nie znaleziono aktywa.", 404);
+    if (ticker !== originalTicker && find(ticker) && (originalTicker || find(ticker).archived_at === null)) fail("Aktywo o takim tickerze już istnieje.", 409);
     for (const { platform, symbol } of symbols) {
-      const owner = db.prepare("SELECT asset_ticker FROM asset_symbols WHERE platform = ? AND symbol = ?").get(platform, symbol);
-      if (owner && owner.asset_ticker !== originalTicker) fail("Ten symbol platformy jest już przypisany do innego aktywa.", 409);
+      const owner = db.prepare("SELECT a.ticker AS asset_ticker FROM asset_symbols s JOIN assets a ON a.id = s.asset_id WHERE platform = ? AND symbol = ?").get(platform, symbol);
+      if (owner && owner.asset_ticker !== (originalTicker ?? ticker)) fail("Ten symbol platformy jest już przypisany do innego aktywa.", 409);
     }
     db.exec("BEGIN IMMEDIATE");
     try {
-      if (originalTicker) {
-        db.prepare("UPDATE assets SET ticker = ?, name = ? WHERE ticker = ?").run(ticker, name, originalTicker);
-        db.prepare("UPDATE transactions SET ticker = ? WHERE ticker = ?").run(ticker, originalTicker);
-        db.prepare("UPDATE quotes SET ticker = ? WHERE ticker = ?").run(ticker, originalTicker);
-        db.prepare("DELETE FROM asset_symbols WHERE asset_ticker = ?").run(ticker);
-      } else db.prepare("INSERT INTO assets VALUES (?, ?)").run(ticker, name);
-      db.prepare("DELETE FROM removed_assets WHERE ticker = ?").run(ticker);
-      const insert = db.prepare("INSERT INTO asset_symbols VALUES (?, ?, ?)");
-      for (const { platform, symbol } of symbols) insert.run(ticker, platform, symbol);
+      const existing = find(originalTicker ?? ticker);
+      const id = existing?.id ?? randomUUID();
+      if (existing) {
+        db.prepare("UPDATE assets SET ticker = ?, name = ?, archived_at = NULL WHERE id = ?").run(ticker, name, id);
+        db.prepare("DELETE FROM asset_symbols WHERE asset_id = ?").run(id);
+      } else db.prepare("INSERT INTO assets(id,ticker,name) VALUES (?,?,?)").run(id, ticker, name);
+      const insert = db.prepare("INSERT INTO asset_symbols VALUES (?,?,?)");
+      for (const { platform, symbol } of symbols) insert.run(id, platform, symbol);
       db.exec("COMMIT");
     } catch (error) { db.exec("ROLLBACK"); throw error; }
     return { ticker, name, symbols };
   }
   function remove(ticker) {
-    if (!db.prepare("SELECT 1 FROM assets WHERE ticker = ?").get(ticker)) {
-      throw Object.assign(new Error("Nie znaleziono aktywa."), { status: 404 });
-    }
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      const transactions = db.prepare("SELECT date, created_at AS createdAt, ticker, type, quantity, price, fee FROM transactions WHERE ticker = ?").all(ticker);
-      const position = calculatePortfolio(transactions)[0];
-      if (position && position.quantity > 1e-9) {
-        throw Object.assign(new Error("Nie można usunąć aktywa z otwartą pozycją. Najpierw zamknij pozycję."), { status: 409 });
-      }
-      db.prepare("INSERT OR IGNORE INTO removed_assets VALUES (?)").run(ticker);
-      db.prepare("DELETE FROM assets WHERE ticker = ?").run(ticker);
-      db.exec("COMMIT");
-    } catch (error) { db.exec("ROLLBACK"); throw error; }
+    const asset = find(ticker);
+    if (!asset || asset.archived_at !== null) throw Object.assign(new Error("Nie znaleziono aktywa."), { status: 404 });
+    db.prepare("UPDATE assets SET archived_at = ? WHERE id = ?").run(Date.now(), asset.id);
   }
   return { list, ensure, save, remove };
 }

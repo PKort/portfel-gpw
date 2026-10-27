@@ -1,0 +1,92 @@
+import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { migrateDatabase, priceToUnits } from "./database.js";
+import { createPriceStore } from "./prices.js";
+import { createAssetStore } from "./assets.js";
+
+const directory = mkdtempSync(join(tmpdir(), "portfel-migration-"));
+let db;
+try {
+  const path = join(directory, "portfolio.db");
+  db = new DatabaseSync(path);
+  db.exec(`CREATE TABLE transactions (id TEXT PRIMARY KEY, created_at INTEGER, date TEXT, ticker TEXT, type TEXT, quantity REAL, price REAL, fee REAL, cost_method TEXT);
+    INSERT INTO transactions VALUES ('buy',1,'2026-01-01','OLD','BUY',10,32.855,5,NULL), ('sale',2,'2026-02-01','OLD','SELL',2,40,1,'AVP');
+    CREATE TABLE quotes(ticker TEXT PRIMARY KEY, price REAL);
+    INSERT INTO quotes VALUES ('OLD',74.8), ('HIDDEN',10), ('ONLYQUOTE',0);
+    CREATE TABLE assets(ticker TEXT PRIMARY KEY, name TEXT NOT NULL);
+    INSERT INTO assets VALUES ('OLD','Pełna nazwa'), ('UNUSED','Bez transakcji');
+    CREATE TABLE asset_symbols(asset_ticker TEXT REFERENCES assets(ticker), platform TEXT, symbol TEXT);
+    INSERT INTO asset_symbols VALUES ('OLD','GPW','OLD.WA');
+    CREATE TABLE removed_assets(ticker TEXT PRIMARY KEY);
+    INSERT INTO removed_assets VALUES ('HIDDEN');
+    CREATE TABLE portfolio_settings(id INTEGER PRIMARY KEY, cost_method TEXT);
+    INSERT INTO portfolio_settings VALUES(1,'AVP');`);
+  migrateDatabase(db);
+  const old = db.prepare("SELECT * FROM assets WHERE ticker = 'OLD'").get();
+  assert.equal(old.name, "Pełna nazwa");
+  assert.equal(old.market, "XWAR");
+  assert.equal(old.currency, "PLN");
+  assert.equal(db.prepare("SELECT asset_id FROM asset_symbols").get().asset_id, old.id);
+  const rows = db.prepare("SELECT * FROM transactions ORDER BY created_at").all();
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].asset_id, old.id);
+  assert.equal(rows[0].price, 32.855);
+  assert.equal(rows[1].cost_method, "AVP");
+  assert.equal(db.prepare("SELECT cost_method FROM portfolio_settings").get().cost_method, "AVP");
+  assert.ok(db.prepare("SELECT archived_at FROM assets WHERE ticker = 'HIDDEN'").get().archived_at);
+  assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+  let prices = createPriceStore(db);
+  assert.deepEqual(prices.getQuotes(), { OLD: 74.8, HIDDEN: 10, ONLYQUOTE: 0 });
+  assert.deepEqual(prices.getQuotes(Date.now()), {}); // Unknown legacy dates must never enter historical valuations.
+  assert.ok(db.prepare("SELECT quoted_at FROM price_observations").all().every(row => row.quoted_at === null));
+  db.close();
+  db = new DatabaseSync(path);
+  migrateDatabase(db);
+  assert.equal(db.prepare("SELECT id FROM assets WHERE ticker = 'OLD'").get().id, old.id);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM price_observations").get().n, 3);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get().n, 2);
+  prices = createPriceStore(db);
+  prices.saveManual(old.id, 12.123456);
+  assert.equal(prices.getQuotes().OLD, 12.123456);
+  assert.equal(db.prepare("SELECT price_units FROM price_observations WHERE source_id = 'manual'").get().price_units, 12123456);
+  db.prepare("INSERT INTO price_sources(id,name,declared_delay_seconds) VALUES ('test','Test',900)").run();
+  prices.configureFeed(old.id, 'test', 'OLD.WA');
+  const observation = { assetId: old.id, sourceId: 'test', currency: 'PLN', priceType: 'last', price: 50, quotedAt: 2000, receivedAt: 3000, dedupKey: 'event-2' };
+  prices.record(observation);
+  prices.record(observation);
+  prices.record({ ...observation, price: 40, quotedAt: 1000, receivedAt: 4000, dedupKey: 'event-1' });
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM price_observations WHERE source_id = 'test'").get().n, 2);
+  assert.equal(prices.getQuotes().OLD, 50); // Late arrival must not replace the more recent market observation.
+  assert.equal(prices.getQuotes(1500).OLD, 40);
+  assert.equal(prices.getQuotes(500).OLD, undefined);
+  prices.saveManual(old.id, 99);
+  assert.equal(prices.getQuotes().OLD, 50); // Manual entry must not switch an automatic feed.
+  assert.throws(() => prices.configureFeed(old.id, 'missing', 'X'), /FOREIGN KEY/);
+  assert.equal(prices.listObserved().find(row => row.assetId === old.id).sourceId, 'test');
+  assert.throws(() => prices.record({ ...observation, quotedAt: null, dedupKey: 'bad-time' }));
+  assert.throws(() => prices.record({ ...observation, assetId: 'missing', dedupKey: 'bad-asset' }), /FOREIGN KEY/);
+  assert.throws(() => prices.record({ ...observation, priceType: 'close', dedupKey: 'bad-close' }), /CHECK/);
+  assert.equal(priceToUnits(74.8), 74800000);
+  for (const price of [-1, Infinity, NaN, 1e20]) assert.throws(() => priceToUnits(price));
+  const store = createAssetStore(db);
+  store.remove('OLD');
+  assert.ok(!prices.listObserved().some(row => row.assetId === old.id));
+  assert.equal(prices.getQuotes(2500).OLD, 50);
+  db.close(); db = null;
+  // A failure after destructive DDL must restore the original database, without a migration marker.
+  db = new DatabaseSync(':memory:');
+  db.exec("CREATE TABLE quotes(ticker TEXT PRIMARY KEY, price REAL); INSERT INTO quotes VALUES('BAD',1e20)");
+  assert.throws(() => migrateDatabase(db));
+  assert.equal(db.prepare("SELECT price FROM quotes").get().price, 1e20);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get().n, 0);
+  db.prepare("UPDATE quotes SET price = 12.5").run();
+  migrateDatabase(db);
+  assert.equal(createPriceStore(db).getQuotes().BAD, 12.5);
+  console.log("Testy migracji i cen: zachowanie danych, restart, rollback, precyzja, deduplikacja, źródła i odczyt historyczny OK");
+} finally {
+  db?.close();
+  rmSync(directory, { recursive: true, force: true });
+}

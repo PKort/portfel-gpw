@@ -1,6 +1,6 @@
 FROM node:24-alpine
 WORKDIR /app
-COPY package.json index.html styles.css app.js theme.js portfolio.js assets.js settings.js server.js ./
+COPY package.json index.html styles.css app.js theme.js legacy-worker.js portfolio.js assets.js settings.js cash-ledger.js migrate-cash.js database.js prices.js quote-status.js providers.js bankier.js yahoo.js quote-collector.js server.js ./
 RUN mkdir -p /app/data && chown -R node:node /app
 USER node
 ENV PORT=3000 DATA_DIR=/app/data

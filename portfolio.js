@@ -79,3 +79,33 @@ export function calculatePortfolioDetails(transactions, quotes = {}, defaultMeth
 export function formatQuantity(value) {
   return new Intl.NumberFormat("pl-PL", { maximumFractionDigits: 6 }).format(value);
 }
+
+// Round each transaction's settlement to grosze before summing cash flows.
+export function transactionCashCents(transaction) {
+  const gross = transaction.quantity * transaction.price;
+  const amount = transaction.type === "BUY" ? -(gross + transaction.fee) : gross - transaction.fee;
+  const cents = Math.sign(amount) * Math.round((Math.abs(amount) + Number.EPSILON) * 100);
+  if (!Number.isSafeInteger(cents)) throw Object.assign(new Error("Przekroczony zakres kwoty transakcji."), { status: 400 });
+  return cents;
+}
+
+export function calculateOperationHistory(transactions, cashOperations, currentCashBalance) {
+  const operations = [
+    ...transactions.map(item => ({ ...item, key: `STOCK/${item.id}`, isStock: true, cashChangeCents: transactionCashCents(item) })),
+    ...cashOperations.map(item => ({ ...item, key: `${item.type}/${item.id}`, isStock: false,
+      cashChangeCents: Math.round(item.amount * 100) * (item.type === "WITHDRAWAL" ? -1 : 1) })),
+  ].sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt || a.key.localeCompare(b.key));
+  // The residual includes the opening balance and any explicit balance adjustment.
+  let balanceCents = Math.round(currentCashBalance * 100) - operations.reduce((sum, item) => sum + item.cashChangeCents, 0);
+  return operations.map(item => {
+    balanceCents += item.cashChangeCents;
+    return { ...item, cashBalanceAfter: balanceCents / 100 };
+  }).reverse();
+}
+
+export function calculateTotalReturn(marketValue, cashBalance, cashOperations) {
+  const depositsCents = cashOperations.filter(item => item.type === "DEPOSIT")
+    .reduce((sum, item) => sum + Math.round(item.amount * 100), 0);
+  const totalDeposits = depositsCents / 100;
+  return { totalDeposits, returnRate: depositsCents > 0 ? (marketValue + cashBalance) / totalDeposits - 1 : null };
+}
