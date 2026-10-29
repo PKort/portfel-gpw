@@ -23,7 +23,7 @@ const collector = createQuoteCollector(db, prices, {
   enabled: process.env.QUOTES_ENABLED !== "0", intervalSeconds: Number(process.env.QUOTES_INTERVAL_SECONDS ?? 300),
 });
 
-const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8" };
+const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8", ".svg": "image/svg+xml" };
 const getTransactions = () => db.prepare(`SELECT t.id, t.created_at AS createdAt, t.date, a.ticker, t.type, t.quantity, t.price, t.fee, t.cost_method AS costMethod
   FROM transactions t JOIN assets a ON a.id = t.asset_id ORDER BY t.date, t.created_at`).all();
 const getQuotes = () => prices.getQuotes();
