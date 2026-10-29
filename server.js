@@ -77,6 +77,9 @@ async function api(request, response, url) {
   }
   if (request.method === "POST" && url.pathname === "/api/cash-deposits") return sendJson(response, 201, settings.deposit(await body(request)));
   if (request.method === "PUT" && url.pathname === "/api/settings") return sendJson(response, 200, settings.save(await body(request)));
+  if (request.method === "PUT" && url.pathname.startsWith("/api/pins/")) {
+    return sendJson(response, 200, assets.pin(decodeURIComponent(url.pathname.slice(10)), (await body(request)).pinned));
+  }
   if (request.method === "POST" && url.pathname === "/api/assets") return sendJson(response, 201, assets.save(null, await body(request)));
   if (request.method === "DELETE" && url.pathname.startsWith("/api/assets/")) {
     assets.remove(decodeURIComponent(url.pathname.slice(12)));

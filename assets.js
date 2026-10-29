@@ -3,13 +3,14 @@ import { migrateDatabase } from "./database.js";
 
 export function createAssetStore(db) {
   migrateDatabase(db);
+  db.exec("CREATE TABLE IF NOT EXISTS pinned_assets (asset_id TEXT PRIMARY KEY REFERENCES assets(id) ON DELETE RESTRICT)");
   const find = ticker => db.prepare("SELECT * FROM assets WHERE ticker = ? AND market = 'XWAR'").get(ticker);
   const ensure = ticker => {
     if (!find(ticker)) db.prepare("INSERT INTO assets(id,ticker,name) VALUES (?,?,?)").run(randomUUID(), ticker, ticker);
     return find(ticker).id;
   };
-  const list = () => db.prepare("SELECT id, ticker, name FROM assets WHERE archived_at IS NULL ORDER BY name, ticker").all().map(asset => ({
-    ticker: asset.ticker, name: asset.name,
+  const list = () => db.prepare("SELECT id, ticker, name, EXISTS(SELECT 1 FROM pinned_assets p WHERE p.asset_id = assets.id) AS pinned FROM assets WHERE archived_at IS NULL ORDER BY name, ticker").all().map(asset => ({
+    ticker: asset.ticker, name: asset.name, pinned: Boolean(asset.pinned),
     symbols: db.prepare("SELECT platform, symbol FROM asset_symbols WHERE asset_id = ? ORDER BY platform").all(asset.id).map(row => ({ ...row })),
   }));
   function save(originalTicker, input) {
@@ -51,5 +52,13 @@ export function createAssetStore(db) {
     if (!asset || asset.archived_at !== null) throw Object.assign(new Error("Nie znaleziono aktywa."), { status: 404 });
     db.prepare("UPDATE assets SET archived_at = ? WHERE id = ?").run(Date.now(), asset.id);
   }
-  return { list, ensure, save, remove };
+  function pin(ticker, pinned) {
+    if (typeof pinned !== "boolean") throw Object.assign(new Error("Podaj stan przypięcia."), { status: 400 });
+    const asset = find(ticker);
+    if (!asset || asset.archived_at !== null) throw Object.assign(new Error("Nie znaleziono aktywnego instrumentu."), { status: 404 });
+    if (pinned) db.prepare("INSERT OR IGNORE INTO pinned_assets(asset_id) VALUES (?)").run(asset.id);
+    else db.prepare("DELETE FROM pinned_assets WHERE asset_id = ?").run(asset.id);
+    return { ticker: asset.ticker, pinned };
+  }
+  return { list, ensure, save, remove, pin };
 }

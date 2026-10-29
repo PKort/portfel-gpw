@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { calculatePortfolio, calculatePortfolioDetails, transactionCashCents, calculateOperationHistory, calculateTotalReturn } from "./portfolio.js";
+import { calculatePortfolio, calculatePortfolioDetails, transactionCashCents, calculateOperationHistory, calculateTotalReturn, selectWatchedPositions } from "./portfolio.js";
 
 const tx = [
   { date: "2026-01-01", createdAt: 1, ticker: "PKO", type: "BUY", quantity: 10, price: 100, fee: 5 },
@@ -129,3 +129,14 @@ assert.deepEqual(calculateTotalReturn(800, 300, []), { totalDeposits: 0, returnR
 assert.equal(calculateTotalReturn(800, 300, [{ type: "DIVIDEND", amount: 100 }]).returnRate, null);
 assert.equal(calculateTotalReturn(0.1, 0.2, [{ type: "DEPOSIT", amount: 0.1 }, { type: "DEPOSIT", amount: 0.2 }]).totalDeposits, 0.3);
 console.log("Testy wyniku całego portfela: wzrost, strata, brak wpłat, dywidendy i wypłaty OK");
+
+const ownedRows = [{ ticker: "OWN", quantity: 2, marketValue: 200 }, { ticker: "SOLD", quantity: 0, marketValue: 0 }];
+const watchRows = selectWatchedPositions(ownedRows, [{ ticker: "OWN", pinned: true }, { ticker: "WATCH", pinned: true }, { ticker: "SOLD", pinned: true }, { ticker: "HIDDEN", pinned: false }], { WATCH: 12, SOLD: 20 });
+assert.deepEqual(watchRows.map(row => row.ticker), ["OWN", "SOLD", "WATCH"]);
+assert.equal(watchRows[0].watchOnly, false);
+assert.equal(watchRows[1].watchOnly, true);
+assert.equal(watchRows[2].quote, 12);
+assert.equal(selectWatchedPositions([], [{ ticker: "MISSING", pinned: true }], {})[0].quote, null);
+assert.equal(selectWatchedPositions(ownedRows, [], {}).length, 1);
+assert.equal(ownedRows[0].pinned, undefined);
+console.log("Testy obserwowanych: bez pozycji, zamknięte pozycje, bez duplikatów i brak kursu OK");

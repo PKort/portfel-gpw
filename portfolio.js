@@ -109,3 +109,12 @@ export function calculateTotalReturn(marketValue, cashBalance, cashOperations) {
   const totalDeposits = depositsCents / 100;
   return { totalDeposits, returnRate: depositsCents > 0 ? (marketValue + cashBalance) / totalDeposits - 1 : null };
 }
+
+export function selectWatchedPositions(positions, assets, quotes) {
+  const pinned = new Set(assets.filter(asset => asset.pinned).map(asset => asset.ticker));
+  const rows = new Map(positions.filter(item => item.quantity > 1e-9).map(item => [item.ticker, { ...item, pinned: pinned.has(item.ticker), watchOnly: false }]));
+  for (const ticker of pinned) {
+    if (!rows.has(ticker)) rows.set(ticker, { ticker, pinned: true, watchOnly: true, quote: quotes[ticker] ?? null });
+  }
+  return [...rows.values()].sort((a, b) => a.ticker.localeCompare(b.ticker));
+}

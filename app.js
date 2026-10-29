@@ -1,4 +1,4 @@
-import { calculatePortfolioDetails, formatQuantity, transactionCashCents, calculateOperationHistory, calculateTotalReturn } from "./portfolio.js";
+import { calculatePortfolioDetails, formatQuantity, transactionCashCents, calculateOperationHistory, calculateTotalReturn, selectWatchedPositions } from "./portfolio.js";
 import { quoteStatus, quoteTooltip } from "./quote-status.js";
 import { providerNames } from "./providers.js";
 
@@ -151,12 +151,12 @@ async function refresh() {
 function render() {
   const { positions, saleResults } = calculatePortfolioDetails(transactions, quotes, defaultCostMethod);
   renderAssets(positions);
-  const open = positions.filter((position) => position.quantity > 1e-9);
+  const open = selectWatchedPositions(positions, assets, quotes);
   document.querySelector("#positions-body").innerHTML = open.length
-    ? open.map((position) => `<tr><td>${assetLabel(position.ticker)}</td><td>${formatQuantity(position.quantity)}</td>
-        <td>${money.format(position.averageCost)}</td><td><div class="position-quote"><input class="quote" data-ticker="${escapeHtml(position.ticker)}" type="number" min="0" step="0.01" value="${position.quote ?? ""}" placeholder="0,00" ${Object.hasOwn(providerNames, quoteDetails[position.ticker]?.sourceId ?? "") ? 'readonly title="Kurs pobierany ze źródła zewnętrznego"' : ""}>${quoteCaption(position.ticker, true)}${externalQuoteButton(position.ticker)}</div></td>
-        <td>${money.format(position.marketValue)}</td><td class="${tone(position.unrealized)}">${money.format(position.unrealized)}</td></tr>`).join("")
-    : '<tr><td colspan="6" class="empty">Brak otwartych pozycji.</td></tr>';
+    ? open.map((position) => `<tr><td><div class="watched-asset">${assetLabel(position.ticker)}${position.pinned ? `<button type="button" class="pin-button" data-pin="${escapeHtml(position.ticker)}" aria-pressed="true" title="Odepnij z obserwowanych" aria-label="Odepnij ${escapeHtml(position.ticker)}">★</button>` : ""}${position.watchOnly ? '<span class="watch-only">Obserwowane</span>' : ""}</div></td><td>${position.watchOnly ? "—" : formatQuantity(position.quantity)}</td>
+        <td>${position.watchOnly ? "—" : money.format(position.averageCost)}</td><td><div class="position-quote"><input class="quote" data-ticker="${escapeHtml(position.ticker)}" type="number" min="0" step="0.01" value="${position.quote ?? ""}" placeholder="0,00" ${Object.hasOwn(providerNames, quoteDetails[position.ticker]?.sourceId ?? "") ? 'readonly title="Kurs pobierany ze źródła zewnętrznego"' : ""}>${quoteCaption(position.ticker, true)}${externalQuoteButton(position.ticker)}</div></td>
+        <td>${position.watchOnly ? "—" : money.format(position.marketValue)}</td><td class="${position.watchOnly ? "" : tone(position.unrealized)}">${position.watchOnly ? "—" : money.format(position.unrealized)}</td></tr>`).join("")
+    : '<tr><td colspan="6" class="empty">Brak otwartych pozycji. Przypnij instrument w zakładce Aktywa, aby obserwować jego kurs.</td></tr>';
   const allHistory = calculateOperationHistory(transactions, cashDeposits, cashBalance);
   const history = prepareHistory(allHistory, saleResults);
   const operationNames = { BUY: "Kupno", SELL: "Sprzedaż", DEPOSIT: "Zasilenie", WITHDRAWAL: "Wypłata", DIVIDEND: "Wypłata dywidendy" };
@@ -394,7 +394,7 @@ function renderAssets() {
     <td>${escapeHtml(asset.name)}</td><td>${escapeHtml(asset.ticker)}</td>
     <td>${asset.symbols.map(item => `${escapeHtml(item.platform)}: ${escapeHtml(item.symbol)}`).join("<br>") || "—"}</td>
     <td class="feed-editor">${feedEditor(asset)}</td>
-    <td><button type="button" class="secondary" data-edit-asset="${escapeHtml(asset.ticker)}" aria-label="Edytuj ${escapeHtml(asset.name)}">Edytuj</button> <button type="button" class="secondary danger" data-remove-asset="${escapeHtml(asset.ticker)}" aria-label="Archiwizuj ${escapeHtml(asset.name)}">Archiwizuj</button></td>
+    <td><button type="button" class="secondary" data-pin="${escapeHtml(asset.ticker)}" aria-pressed="${asset.pinned}">${asset.pinned ? "★ Odepnij" : "☆ Przypnij"}</button> <button type="button" class="secondary" data-edit-asset="${escapeHtml(asset.ticker)}" aria-label="Edytuj ${escapeHtml(asset.name)}">Edytuj</button> <button type="button" class="secondary danger" data-remove-asset="${escapeHtml(asset.ticker)}" aria-label="Archiwizuj ${escapeHtml(asset.name)}">Archiwizuj</button></td>
   </tr>`).join("") : '<tr><td colspan="5" class="empty">Brak aktywów. Dodaj pierwsze aktywo lub transakcję.</td></tr>';
   document.querySelector("#asset-options").innerHTML = assets.map(asset => `<option value="${escapeHtml(asset.ticker)}">${escapeHtml(asset.name)}</option>`).join("");
 }
@@ -434,6 +434,22 @@ document.querySelectorAll("[data-view]").forEach(button => button.addEventListen
     else item.removeAttribute("aria-current");
   });
 }));
+document.addEventListener("click", async event => {
+  const button = event.target.closest("[data-pin]");
+  if (!button) return;
+  button.disabled = true;
+  const ticker = button.dataset.pin;
+  const pinned = button.getAttribute("aria-pressed") !== "true";
+  try {
+    await request(`/api/pins/${encodeURIComponent(ticker)}`, { method: "PUT", body: JSON.stringify({ pinned }) });
+    await refresh();
+    document.querySelector("#watchlist-status").textContent = `${pinned ? "Przypięto" : "Odpięto"}: ${ticker}.`;
+    assetStatus.textContent = `${pinned ? "Przypięto" : "Odpięto"}: ${ticker}.`;
+  } catch (caught) {
+    document.querySelector("#watchlist-status").textContent = caught.message;
+    assetStatus.textContent = caught.message;
+  } finally { button.disabled = false; }
+});
 document.querySelector("#new-asset").addEventListener("click", () => editAsset());
 document.querySelector("#assets-body").addEventListener("input", event => {
   if (!event.target.matches('[data-provider-alias]')) return;

@@ -51,7 +51,13 @@ try {
   const definition = { ticker: "NEW", name: "Nowa nazwa", symbols: [{ platform: "GPW", symbol: "NEW" }] };
   assert.equal((await request("/api/assets/OLD", "PUT", definition)).status, 200);
   const state = (await request("/api/state")).body;
-  assert.deepEqual(state.assets, [definition]);
+  assert.deepEqual(state.assets, [{ ...definition, pinned: false }]);
+  assert.equal((await request("/api/pins/NEW", "PUT", { pinned: true })).status, 200);
+  assert.equal((await request("/api/state")).body.assets[0].pinned, true);
+  assert.equal((await request("/api/pins/NEW", "PUT", { pinned: "true" })).status, 400);
+  assert.equal((await request("/api/pins/MISSING", "PUT", { pinned: true })).status, 404);
+  assert.equal((await request("/api/pins/NEW", "PUT", { pinned: false })).status, 200);
+  assert.equal((await request("/api/state")).body.assets[0].pinned, false);
   assert.equal(state.transactions[0].ticker, "NEW");
   assert.deepEqual(state.quotes, { NEW: 25 });
   assert.equal((await request("/api/assets", "POST", definition)).status, 409);

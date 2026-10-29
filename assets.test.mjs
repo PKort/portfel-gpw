@@ -12,7 +12,7 @@ try {
   prices.saveManual(id, 25);
   const definition = { ticker: "NEW", name: 'Spółka <A> & "B"', symbols: [{ platform: "GPW", symbol: "NEW" }] };
   store.save("OLD", definition);
-  assert.deepEqual(store.list(), [definition]);
+  assert.deepEqual(store.list(), [{ ...definition, pinned: false }]);
   assert.equal(store.ensure("NEW"), id);
   assert.equal(db.prepare("SELECT asset_id FROM transactions").get().asset_id, id);
   assert.deepEqual(prices.getQuotes(), { NEW: 25 });
@@ -25,7 +25,7 @@ try {
   // A failure during symbol replacement rolls back the renamed asset as well.
   db.exec("CREATE TRIGGER fail_symbol BEFORE INSERT ON asset_symbols BEGIN SELECT RAISE(ABORT, 'test failure'); END");
   assert.throws(() => store.save("NEW", { ...definition, ticker: "FAIL" }), /test failure/);
-  assert.deepEqual(store.list(), [definition]);
+  assert.deepEqual(store.list(), [{ ...definition, pinned: false }]);
   db.exec("DROP TRIGGER fail_symbol");
   // Archiving is also allowed with an open position and must retain every relation.
   store.remove("NEW");
@@ -39,8 +39,24 @@ try {
   assert.deepEqual(store.list(), []);
   store.save(null, definition);
   assert.equal(store.ensure("NEW"), id);
-  assert.deepEqual(store.list(), [definition]);
+  assert.deepEqual(store.list(), [{ ...definition, pinned: false }]);
   assert.equal(prices.listObserved()[0].status, "unconfigured");
   assert.throws(() => db.prepare("DELETE FROM assets WHERE id = ?").run(id), /FOREIGN KEY/);
+  assert.throws(() => store.pin("NEW", "true"), error => error.status === 400);
+  assert.throws(() => store.pin("MISSING", true), error => error.status === 404);
+  store.pin("NEW", true);
+  store.pin("NEW", true);
+  assert.equal(createAssetStore(db).list()[0].pinned, true);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM pinned_assets").get().n, 1);
+  store.save("NEW", { ...definition, ticker: "RENAMED" });
+  assert.equal(store.list()[0].pinned, true);
+  store.remove("RENAMED");
+  assert.equal(store.list().length, 0);
+  assert.throws(() => store.pin("RENAMED", false), error => error.status === 404);
+  store.save(null, { ...definition, ticker: "RENAMED" });
+  assert.equal(store.list()[0].pinned, true);
+  store.pin("RENAMED", false);
+  assert.equal(store.list()[0].pinned, false);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM transactions").get().n, 1);
   console.log("Testy aktywów: identyfikatory, zmiana tickera, archiwizacja, przywracanie, walidacja i rollback OK");
 } finally { db.close(); }

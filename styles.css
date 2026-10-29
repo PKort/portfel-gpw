@@ -182,6 +182,14 @@ button:disabled { opacity: .6; cursor: wait; }
   .cost-method-control { gap: 6px; }
 }
 
+.watched-asset { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.watched-asset > strong { display: block; }
+.watched-asset > .asset-ticker { flex-basis: 100%; order: 2; }
+.pin-button { padding: 2px 5px; background: transparent; color: var(--positive); font-size: 1rem; }
+.watch-only { color: var(--muted); font-size: .7rem; border: 1px solid var(--border); padding: 2px 5px; border-radius: 5px; }
+#watchlist-status:empty { display: none; }
+#watchlist-status { color: var(--muted); font-size: .8rem; }
+
 .history-column { padding: 5px 0; background: transparent; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit; }
 .history-column span { margin-left: 5px; }
 .history-column.filtered { color: var(--positive); }

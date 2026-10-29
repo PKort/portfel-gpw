@@ -161,3 +161,11 @@ Dywidenda wymaga emitenta ze słownika aktywów (pole **Aktywo / emitent**). API
 Wybór globalnej metody FIFO/AVP znajduje się w nagłówku obok przełącznika motywu. Podsumowanie domyślnie pokazuje wartość pozycji, wynik portfela, gotówkę i wynik niezrealizowany. Pasek **Więcej szczegółów** rozwija łączną wartość portfela (pozycje + gotówka), sumę wpłat, koszt otwartych pozycji i wynik zrealizowany. W zwartych wierszach pozycji łapka oznacza kurs ręczny, a kropka kurs zewnętrzny (zielona przy działającym odświeżaniu, szara w pozostałych stanach). Po najechaniu na ikonę dostępne są źródło, status, ostatni kurs i czas notowania.
 
 Podpowiedź przy ikonie kursu rozdziela **Ostatni kurs** (cena i czas notowania), **Ostatnie odświeżenie** (czas próby/pobrania i OK, błąd lub trwająca próba) oraz **Źródło**. Czasy podane są w strefie Europe/Warsaw. Przy błędzie widoczny jest też czas ostatniego udanego pobrania. OK oznacza poprawne pobranie; źródło może nadal zwracać starsze notowanie.
+
+Przeniesienie obecnej bazy na inny serwer opisuje [SERVER-MIGRATION.md](SERVER-MIGRATION.md). Narzędzie `scripts/database-transfer.mjs` tworzy spójną kopię SQLite z manifestem i weryfikuje przesłany plik przed importem.
+
+## Przypięte aktywa
+
+W zakładce **Aktywa** przycisk **☆ Przypnij** dodaje instrument do sekcji **Stan na dziś → Pozycje i obserwowane**, także bez zakupu akcji. Kurs, źródło i odświeżanie działają tak samo jak dla pozycji. Instrument bez otwartej pozycji ma oznaczenie **Obserwowane** oraz kreski zamiast liczby akcji, kosztu, wartości i wyniku; nie wpływa na podsumowanie portfela. **★ Odepnij** usuwa przypięcie, ale otwarta pozycja pozostaje widoczna.
+
+Przypięcia przechowuje tabela `pinned_assets` powiązana ze stałym identyfikatorem aktywa. Tabela powstaje automatycznie przy starcie, bez zmiany transakcji i salda. Zmiana tickera zachowuje przypięcie. Archiwizacja ukrywa obserwowany instrument bez pozycji i wstrzymuje pobieranie; przywrócenie przywraca także przypięcie. `PUT /api/pins/:ticker` przyjmuje `{ "pinned": true | false }`, a elementy `assets` w `GET /api/state` zawierają `pinned`.
