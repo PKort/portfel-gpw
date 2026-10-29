@@ -86,11 +86,12 @@
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Data</th><th>Aktywo</th><th>Typ</th><th>Liczba</th><th>Cena</th><th>Wartość</th><th>Prowizja</th><th>Metoda</th><th>Zysk/strata</th><th>Saldo gotówki po operacji</th><th></th></tr></thead>
+            <thead id="history-columns"><tr><th scope="col"><button type="button" class="history-column" data-column="date">Data <span aria-hidden="true">▾</span></button></th><th scope="col"><button type="button" class="history-column" data-column="asset">Aktywo <span aria-hidden="true">▾</span></button></th><th scope="col"><button type="button" class="history-column" data-column="type">Typ <span aria-hidden="true">▾</span></button></th><th scope="col"><button type="button" class="history-column" data-column="quantity">Liczba <span aria-hidden="true">▾</span></button></th><th scope="col"><button type="button" class="history-column" data-column="price">Cena <span aria-hidden="true">▾</span></button></th><th scope="col"><button type="button" class="history-column" data-column="value">Wartość <span aria-hidden="true">▾</span></button></th><th scope="col"><button type="button" class="history-column" data-column="fee">Prowizja <span aria-hidden="true">▾</span></button></th><th scope="col"><button type="button" class="history-column" data-column="method">Metoda <span aria-hidden="true">▾</span></button></th><th scope="col"><button type="button" class="history-column" data-column="profit">Zysk/strata <span aria-hidden="true">▾</span></button></th><th scope="col"><button type="button" class="history-column" data-column="balance">Saldo gotówki po operacji <span aria-hidden="true">▾</span></button></th><th scope="col"><span class="sr-only">Akcje</span></th></tr></thead>
             <tbody id="transactions-body"></tbody>
           </table>
         </div>
-        <p class="hint">Najnowsze operacje są na górze. Saldo liczone jest chronologicznie; dla tego samego dnia według kolejności dodania, a przy jednakowym czasie według identyfikatora operacji. Uwzględnia saldo początkowe i ewentualne ręczne korekty.</p>
+        <div class="history-toolbar"><span id="history-status" role="status"></span><button id="history-reset" type="button" class="secondary">Wyczyść filtry i sortowanie</button></div>
+        <p class="hint">Kliknij nagłówek kolumny, aby sortować lub filtrować. Domyślnie najnowsze operacje są na górze. Saldo liczone jest chronologicznie; dla tego samego dnia według kolejności dodania, a przy jednakowym czasie według identyfikatora operacji. Uwzględnia saldo początkowe i ewentualne ręczne korekty.</p>
         <p class="hint">Wynik sprzedaży uwzględnia prowizje zakupu i sprzedaży. FIFO rozlicza najstarsze zakupy, AVP — średni ważony koszt posiadanych akcji. AVP uśrednia koszt pozostałych akcji; późniejsza sprzedaż FIFO zaczyna od tej uśrednionej partii. Metodę pojedynczej sprzedaży zmienisz przez „Edytuj”.</p>
       </section>
       </div>
@@ -128,5 +129,13 @@
         document.querySelector("#form-error").textContent = "Nie udało się uruchomić aplikacji. Odśwież stronę przez Ctrl+F5. Jeśli problem wraca, wyrejestruj Service Workera dla tego adresu.";
       }
     </script>
+    <dialog id="history-filter" aria-labelledby="history-filter-title">
+      <div class="panel-heading"><h2 id="history-filter-title">Sortowanie i filtr</h2><button type="button" id="history-filter-close" class="secondary" aria-label="Zamknij">×</button></div>
+      <div class="history-sort-actions"><button type="button" data-history-direction="asc" class="secondary">Sortuj rosnąco ↑</button><button type="button" data-history-direction="desc" class="secondary">Sortuj malejąco ↓</button></div>
+      <label>Szukaj wartości<input id="history-filter-search" type="search" placeholder="Wpisz szukaną wartość"></label>
+      <div class="history-sort-actions"><button type="button" id="history-filter-all" class="secondary">Zaznacz widoczne</button><button type="button" id="history-filter-none" class="secondary">Odznacz widoczne</button></div>
+      <div id="history-filter-values"></div>
+      <div class="history-sort-actions"><button type="button" id="history-filter-clear" class="secondary">Usuń filtr kolumny</button><button type="button" id="history-filter-apply">Zastosuj filtr</button></div>
+    </dialog>
   </body>
 </html>

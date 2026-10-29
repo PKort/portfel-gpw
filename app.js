@@ -34,6 +34,103 @@ async function request(path, options) {
   return result;
 }
 
+const historyFilters = new Map();
+let historySort = { column: "date", direction: "desc" };
+const historyCollator = new Intl.Collator("pl", { numeric: true, sensitivity: "base" });
+const historyDialog = document.querySelector("#history-filter");
+let filterColumn;
+let filterOptions = [];
+let filterSelection = new Set();
+const historyNames = { BUY: "Kupno", SELL: "Sprzedaż", DEPOSIT: "Zasilenie", WITHDRAWAL: "Wypłata", DIVIDEND: "Wypłata dywidendy" };
+function historyValue(item, column, sales) {
+  const sale = item.type === "SELL" ? sales.get(item.id) : null;
+  switch (column) {
+    case "asset": return item.isStock ? (assets.find(asset => asset.ticker === item.ticker)?.name ?? item.ticker) : item.type === "DIVIDEND" ? (item.ticker ? item.assetName ?? item.ticker : "Nieprzypisany emitent — edytuj") : "Gotówka";
+    case "type": return historyNames[item.type];
+    case "quantity": case "price": case "fee": return item.isStock ? item[column] : null;
+    case "value": return item.isStock ? item.quantity * item.price : item.amount;
+    case "method": return sale ? `${sale.method}${item.costMethod ? "" : " (globalna)"}` : null;
+    case "profit": return sale?.profit ?? null;
+    case "balance": return item.cashBalanceAfter;
+    default: return item.date;
+  }
+}
+function historyLabel(value, column) {
+  if (value == null) return "(Puste)";
+  if (["price", "value", "fee", "profit", "balance"].includes(column)) return (column === "price" ? price : money).format(value);
+  return column === "quantity" ? formatQuantity(value) : String(value);
+}
+function historyKey(item, column, sales) { return historyLabel(historyValue(item, column, sales), column); }
+function prepareHistory(rows, sales) {
+  const filtered = rows.filter(item => [...historyFilters].every(([column, values]) => values.has(historyKey(item, column, sales))));
+  const { column, direction } = historySort;
+  filtered.sort((a, b) => {
+    const left = historyValue(a, column, sales), right = historyValue(b, column, sales);
+    if (left == null || right == null) return left == null ? (right == null ? 0 : 1) : -1;
+    const compared = typeof left === "number" ? left - right : historyCollator.compare(left, right);
+    return direction === "asc" ? compared : -compared;
+  });
+  document.querySelectorAll("[data-column]").forEach(button => {
+    const active = button.dataset.column === column;
+    button.closest("th").setAttribute("aria-sort", active ? (direction === "asc" ? "ascending" : "descending") : "none");
+    button.classList.toggle("filtered", historyFilters.has(button.dataset.column));
+    button.querySelector("span").textContent = `${historyFilters.has(button.dataset.column) ? "⏷ " : ""}${active ? (direction === "asc" ? "↑" : "↓") : "▾"}`;
+    button.setAttribute("aria-label", `${button.textContent.trim()}. Sortowanie i filtrowanie${historyFilters.has(button.dataset.column) ? ", filtr aktywny" : ""}`);
+  });
+  document.querySelector("#history-status").textContent = `Operacje: ${filtered.length} z ${rows.length}${historyFilters.size ? ` · Aktywne filtry: ${historyFilters.size}` : ""}`;
+  return filtered;
+}
+function renderFilterOptions() {
+  const search = document.querySelector("#history-filter-search").value;
+  const query = search.toLocaleLowerCase("pl");
+  const visible = filterOptions.filter(value => value.toLocaleLowerCase("pl").includes(query));
+  document.querySelector("#history-filter-values").innerHTML = visible.length ? visible.map(value => `<label><input type="checkbox" value="${escapeHtml(value)}" ${filterSelection.has(value) ? "checked" : ""}>${escapeHtml(value)}</label>`).join("") : '<p class="hint">Brak pasujących wartości.</p>';
+}
+document.querySelector("#history-columns").addEventListener("click", event => {
+  const button = event.target.closest("[data-column]");
+  if (!button) return;
+  filterColumn = button.dataset.column;
+  const { saleResults } = calculatePortfolioDetails(transactions, quotes, defaultCostMethod);
+  const rows = calculateOperationHistory(transactions, cashDeposits, cashBalance);
+  const values = rows.map(item => historyValue(item, filterColumn, saleResults));
+  values.sort((a, b) => a == null ? 1 : b == null ? -1 : typeof a === "number" ? a - b : historyCollator.compare(a, b));
+  filterOptions = [...new Set(values.map(value => historyLabel(value, filterColumn)))];
+  filterSelection = new Set(historyFilters.get(filterColumn) ?? filterOptions);
+  document.querySelector("#history-filter-title").textContent = button.childNodes[0].textContent.trim();
+  document.querySelector("#history-filter-search").value = "";
+  renderFilterOptions();
+  historyDialog.showModal();
+});
+document.querySelector("#history-filter-search").addEventListener("input", renderFilterOptions);
+document.querySelector("#history-filter-values").addEventListener("change", event => {
+  if (event.target.checked) filterSelection.add(event.target.value);
+  else filterSelection.delete(event.target.value);
+});
+for (const [id, checked] of [["history-filter-all", true], ["history-filter-none", false]]) {
+  document.getElementById(id).addEventListener("click", () => {
+    document.querySelectorAll('#history-filter-values input').forEach(input => {
+      if (checked) filterSelection.add(input.value); else filterSelection.delete(input.value);
+    });
+    renderFilterOptions();
+  });
+}
+document.querySelectorAll("[data-history-direction]").forEach(button => button.addEventListener("click", () => {
+  historySort = { column: filterColumn, direction: button.dataset.historyDirection };
+  historyDialog.close(); render();
+}));
+document.querySelector("#history-filter-close").addEventListener("click", () => historyDialog.close());
+document.querySelector("#history-filter-apply").addEventListener("click", () => {
+  if (filterOptions.every(value => filterSelection.has(value))) historyFilters.delete(filterColumn);
+  else historyFilters.set(filterColumn, new Set(filterSelection));
+  historyDialog.close(); render();
+});
+document.querySelector("#history-filter-clear").addEventListener("click", () => {
+  historyFilters.delete(filterColumn); historyDialog.close(); render();
+});
+document.querySelector("#history-reset").addEventListener("click", () => {
+  historyFilters.clear(); historySort = { column: "date", direction: "desc" }; render();
+});
+
 async function refresh() {
   const state = await request("/api/state");
   transactions = state.transactions;
@@ -60,7 +157,8 @@ function render() {
         <td>${money.format(position.averageCost)}</td><td><div class="position-quote"><input class="quote" data-ticker="${escapeHtml(position.ticker)}" type="number" min="0" step="0.01" value="${position.quote ?? ""}" placeholder="0,00" ${Object.hasOwn(providerNames, quoteDetails[position.ticker]?.sourceId ?? "") ? 'readonly title="Kurs pobierany ze źródła zewnętrznego"' : ""}>${quoteCaption(position.ticker, true)}${externalQuoteButton(position.ticker)}</div></td>
         <td>${money.format(position.marketValue)}</td><td class="${tone(position.unrealized)}">${money.format(position.unrealized)}</td></tr>`).join("")
     : '<tr><td colspan="6" class="empty">Brak otwartych pozycji.</td></tr>';
-  const history = calculateOperationHistory(transactions, cashDeposits, cashBalance);
+  const allHistory = calculateOperationHistory(transactions, cashDeposits, cashBalance);
+  const history = prepareHistory(allHistory, saleResults);
   const operationNames = { BUY: "Kupno", SELL: "Sprzedaż", DEPOSIT: "Zasilenie", WITHDRAWAL: "Wypłata", DIVIDEND: "Wypłata dywidendy" };
   document.querySelector("#transactions-body").innerHTML = history.length
     ? history.map(item => {
@@ -77,7 +175,7 @@ function render() {
         <td class="${sale ? tone(sale.profit) : ""}" ${sale ? `title="Koszt jednostkowy rozliczony metodą ${sale.method}: ${price.format(sale.averageAcquisitionCost)}"` : ""}>${sale ? money.format(sale.profit) : "—"}</td>
         <td class="cash-after ${tone(item.cashBalanceAfter)}">${money.format(item.cashBalanceAfter)}</td><td>${actions}</td></tr>`;
     }).join("")
-    : '<tr><td colspan="11" class="empty">Dodaj pierwszą operację.</td></tr>';
+    : `<tr><td colspan="11" class="empty">${allHistory.length ? 'Brak operacji spełniających wybrane filtry.' : 'Dodaj pierwszą operację.'}</td></tr>`;
   const totals = positions.reduce((sum, p) => ({ marketValue: sum.marketValue + p.marketValue, cost: sum.cost + p.cost, unrealized: sum.unrealized + p.unrealized, realized: sum.realized + p.realized }), { marketValue: 0, cost: 0, unrealized: 0, realized: 0 });
   const { totalDeposits, returnRate } = calculateTotalReturn(totals.marketValue, cashBalance, cashDeposits);
   setMetric("total-deposits", totalDeposits);
