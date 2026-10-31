@@ -12,7 +12,13 @@
     <main class="shell">
       <header>
         <div class="header-toolbar">
-          <p class="eyebrow">Mój portfel</p>
+          <div class="header-navigation">
+            <h1 class="eyebrow">Mój portfel</h1>
+            <nav class="view-menu" aria-label="Menu główne">
+              <button type="button" data-view="portfolio" aria-current="page">Portfel</button>
+              <button type="button" data-view="assets" class="secondary">Aktywa</button>
+            </nav>
+          </div>
           <div class="header-controls">
           <label class="cost-method-control" title="Globalna metoda wyliczania zysku/straty. Metoda wybrana dla pojedynczej sprzedaży ma pierwszeństwo.">Metoda wyniku<select id="global-cost-method" aria-label="Globalna metoda wyliczania zysku i straty"><option value="FIFO">FIFO</option><option value="AVP">AVP</option></select></label>
           <button id="theme-toggle" class="secondary" type="button" aria-label="Włącz ciemny motyw" title="Włącz ciemny motyw">
@@ -22,14 +28,8 @@
           </div>
         </div>
         <p id="settings-status" role="status"></p>
-        <h1>Portfel GPW</h1>
-        <p class="subtitle">Transakcje, otwarte pozycje i wynik liczony metodą FIFO lub AVP.</p>
       </header>
 
-      <nav class="view-menu" aria-label="Menu główne">
-        <button type="button" data-view="portfolio" aria-current="page">Portfel</button>
-        <button type="button" data-view="assets" class="secondary">Aktywa</button>
-      </nav>
       <div id="portfolio-view">
       <section class="summary" aria-label="Podsumowanie portfela">
         <article><span>Wartość pozycji</span><strong id="market-value">0,00 zł</strong></article>
@@ -47,10 +47,6 @@
         </section>
       </details>
 
-      <div class="operations-toolbar">
-        <div><h2>Operacje na rachunku</h2><p class="hint">Akcje i gotówka w jednym miejscu.</p></div>
-        <div class="asset-actions"><button id="load-demo" class="secondary" type="button">Wczytaj przykład</button><button id="new-operation" type="button">+ Dodaj operację</button></div>
-      </div>
       <dialog id="operation-dialog" aria-labelledby="transaction-heading">
         <div class="operation-heading"><h2 id="transaction-heading">Dodaj operację</h2><button id="close-operation" class="secondary" type="button">Zamknij</button></div>
         <p id="transaction-mode" class="eyebrow">Nowy zapis</p>
@@ -81,19 +77,22 @@
 
       </section>
 
-      <section class="panel">
+      <section class="panel history-panel" id="history-panel">
         <div class="panel-heading">
           <div><p class="eyebrow">Historia</p><h2>Wszystkie operacje</h2></div>
-          <button id="clear-all" class="danger secondary" type="button">Usuń transakcje akcji</button>
+          <button id="new-operation" type="button">+ Dodaj operację</button>
         </div>
-        <div class="table-wrap">
-          <table>
-            <thead id="history-columns"><tr><th scope="col"><button type="button" class="history-column" data-column="date">Data <span aria-hidden="true">▾</span></button></th><th scope="col"><button type="button" class="history-column" data-column="asset">Aktywo <span aria-hidden="true">▾</span></button></th><th scope="col"><button type="button" class="history-column" data-column="type">Typ <span aria-hidden="true">▾</span></button></th><th scope="col"><button type="button" class="history-column" data-column="quantity">Liczba <span aria-hidden="true">▾</span></button></th><th scope="col"><button type="button" class="history-column" data-column="price">Cena <span aria-hidden="true">▾</span></button></th><th scope="col"><button type="button" class="history-column" data-column="value">Wartość <span aria-hidden="true">▾</span></button></th><th scope="col"><button type="button" class="history-column" data-column="fee">Prowizja <span aria-hidden="true">▾</span></button></th><th scope="col"><button type="button" class="history-column" data-column="method">Metoda <span aria-hidden="true">▾</span></button></th><th scope="col"><button type="button" class="history-column" data-column="profit">Zysk/strata <span aria-hidden="true">▾</span></button></th><th scope="col"><button type="button" class="history-column" data-column="balance">Saldo gotówki po operacji <span aria-hidden="true">▾</span></button></th><th scope="col"><span class="sr-only">Akcje</span></th></tr></thead>
+        <div class="history-extra-filters"><span>Sortuj / filtruj szczegóły:</span><button type="button" class="history-column" data-column="fee">Prowizja <span aria-hidden="true">▾</span></button><button type="button" class="history-column" data-column="method">Metoda <span aria-hidden="true">▾</span></button><button id="history-reset" type="button" class="secondary">Wyczyść filtry i sortowanie</button></div>
+        <div id="history-scroll-top" class="history-scroll-top" tabindex="0" role="region" aria-label="Przewijanie poziome historii" hidden><div></div></div>
+        <div class="table-wrap history-scroll" id="history-scroll" tabindex="0" role="region" aria-label="Historia operacji">
+          <table class="history-table">
+            <thead id="history-columns"><tr><th scope="col"><button type="button" class="history-column" data-column="date">Data <span aria-hidden="true">▾</span></button></th><th scope="col"><button type="button" class="history-column" data-column="asset">Aktywo <span aria-hidden="true">▾</span></button></th><th scope="col"><button type="button" class="history-column" data-column="type">Typ <span aria-hidden="true">▾</span></button></th><th scope="col"><button type="button" class="history-column" data-column="quantity">Liczba <span aria-hidden="true">▾</span></button></th><th scope="col"><button type="button" class="history-column" data-column="price">Cena <span aria-hidden="true">▾</span></button></th><th scope="col"><button type="button" class="history-column" data-column="value">Wartość <span aria-hidden="true">▾</span></button></th><th scope="col"><button type="button" class="history-column" data-column="profit">Zysk/strata <span aria-hidden="true">▾</span></button></th><th scope="col"><button type="button" class="history-column" data-column="balance" title="Saldo gotówki po operacji">Saldo <span aria-hidden="true">▾</span></button></th><th scope="col"><span class="sr-only">Akcje</span></th></tr></thead>
             <tbody id="transactions-body"></tbody>
           </table>
         </div>
-        <div class="history-toolbar"><span id="history-status" role="status"></span><button id="history-reset" type="button" class="secondary">Wyczyść filtry i sortowanie</button></div>
-        <p class="hint">Kliknij nagłówek kolumny, aby sortować lub filtrować. Domyślnie najnowsze operacje są na górze. Saldo liczone jest chronologicznie; dla tego samego dnia według kolejności dodania, a przy jednakowym czasie według identyfikatora operacji. Uwzględnia saldo początkowe i ewentualne ręczne korekty.</p>
+        <div class="history-expand"><button id="history-show-all" class="secondary" type="button" aria-expanded="false" aria-controls="transactions-body" hidden>Pokaż wszystkie operacje</button></div>
+        <div class="history-toolbar"><span id="history-status" role="status"></span><button id="clear-all" class="danger secondary" type="button">Usuń transakcje akcji</button></div>
+        <p class="hint">Kliknij nagłówek kolumny, aby sortować lub filtrować. Prowizja i metoda rozliczenia są dostępne pod przyciskiem „Szczegóły”. Domyślnie najnowsze operacje są na górze. Saldo liczone jest chronologicznie; dla tego samego dnia według kolejności dodania, a przy jednakowym czasie według identyfikatora operacji. Uwzględnia saldo początkowe i ewentualne ręczne korekty.</p>
         <p class="hint">Wynik sprzedaży uwzględnia prowizje zakupu i sprzedaży. FIFO rozlicza najstarsze zakupy, AVP — średni ważony koszt posiadanych akcji. AVP uśrednia koszt pozostałych akcji; późniejsza sprzedaż FIFO zaczyna od tej uśrednionej partii. Metodę pojedynczej sprzedaży zmienisz przez „Edytuj”.</p>
       </section>
       </div>

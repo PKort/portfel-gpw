@@ -21,9 +21,9 @@ let editingCashOperation = null;
 const operationDialog = document.querySelector("#operation-dialog");
 let savingTransaction = false;
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
-const assetLabel = (ticker) => {
+const assetLabel = (ticker, compact = false) => {
   const asset = assets.find(asset => asset.ticker === ticker);
-  return asset ? `<strong>${escapeHtml(asset.name)}</strong><small class="asset-ticker">${escapeHtml(ticker)}</small>` : `<strong>${escapeHtml(ticker)}</strong>`;
+  return asset ? `<strong>${escapeHtml(asset.name)}</strong>${compact && asset.name === ticker ? "" : `<small class="asset-ticker">${escapeHtml(ticker)}</small>`}` : `<strong>${escapeHtml(ticker)}</strong>`;
 };
 form.elements.date.valueAsDate = new Date();
 
@@ -35,12 +35,23 @@ async function request(path, options) {
 }
 
 const historyFilters = new Map();
+let historyExpanded = false;
 let historySort = { column: "date", direction: "desc" };
 const historyCollator = new Intl.Collator("pl", { numeric: true, sensitivity: "base" });
 const historyDialog = document.querySelector("#history-filter");
 let filterColumn;
 let filterOptions = [];
 let filterSelection = new Set();
+const historyIcon = name => {
+  const paths = {
+    DEPOSIT: '<path d="M12 3v12m-4-4 4 4 4-4M4 14v6h16v-6"/>',
+    WITHDRAWAL: '<path d="M12 15V3m-4 4 4-4 4 4M4 14v6h16v-6"/>',
+    DIVIDEND: '<ellipse cx="9" cy="6" rx="6" ry="3"/><path d="M3 6v5c0 1.7 2.7 3 6 3M3 11v5c0 1.7 2.7 3 6 3"/><ellipse cx="16" cy="13" rx="5" ry="3"/><path d="M11 13v5c0 1.7 2.2 3 5 3s5-1.3 5-3v-5"/>',
+    edit: '<path d="m16 3 5 5-12 12-6 1 1-6L16 3Zm-3 3 5 5"/>',
+    remove: '<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/>'
+  };
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
+};
 const historyNames = { BUY: "Kupno", SELL: "Sprzedaż", DEPOSIT: "Zasilenie", WITHDRAWAL: "Wypłata", DIVIDEND: "Wypłata dywidendy" };
 function historyValue(item, column, sales) {
   const sale = item.type === "SELL" ? sales.get(item.id) : null;
@@ -72,21 +83,44 @@ function prepareHistory(rows, sales) {
   });
   document.querySelectorAll("[data-column]").forEach(button => {
     const active = button.dataset.column === column;
-    button.closest("th").setAttribute("aria-sort", active ? (direction === "asc" ? "ascending" : "descending") : "none");
+    button.closest("th")?.setAttribute("aria-sort", active ? (direction === "asc" ? "ascending" : "descending") : "none");
     button.classList.toggle("filtered", historyFilters.has(button.dataset.column));
     button.querySelector("span").textContent = `${historyFilters.has(button.dataset.column) ? "⏷ " : ""}${active ? (direction === "asc" ? "↑" : "↓") : "▾"}`;
     button.setAttribute("aria-label", `${button.textContent.trim()}. Sortowanie i filtrowanie${historyFilters.has(button.dataset.column) ? ", filtr aktywny" : ""}`);
   });
-  document.querySelector("#history-status").textContent = `Operacje: ${filtered.length} z ${rows.length}${historyFilters.size ? ` · Aktywne filtry: ${historyFilters.size}` : ""}`;
+  document.querySelector("#history-status").textContent = `Wyświetlono: ${historyExpanded ? filtered.length : Math.min(5, filtered.length)} z ${filtered.length} operacji${historyFilters.size ? ` (łącznie: ${rows.length})` : ""}${historyFilters.size ? ` · Aktywne filtry: ${historyFilters.size}` : ""}`;
   return filtered;
 }
+
+const historyScroll = document.querySelector("#history-scroll");
+const historyScrollTop = document.querySelector("#history-scroll-top");
+function syncHistoryWidth() {
+  historyScrollTop.firstElementChild.style.width = `${historyScroll.scrollWidth}px`;
+  historyScrollTop.hidden = historyScroll.scrollWidth <= historyScroll.clientWidth + 1;
+  historyScrollTop.scrollLeft = historyScroll.scrollLeft;
+  const cells = document.querySelectorAll(".history-operation > td:first-child");
+  historyScroll.style.setProperty("--history-date-width", `${cells[0]?.getBoundingClientRect().width ?? 96}px`);
+}
+new ResizeObserver(syncHistoryWidth).observe(historyScroll);
+new ResizeObserver(syncHistoryWidth).observe(historyScroll.querySelector("table"));
+historyScroll.addEventListener("scroll", () => { historyScrollTop.scrollLeft = historyScroll.scrollLeft; });
+historyScrollTop.addEventListener("scroll", () => { historyScroll.scrollLeft = historyScrollTop.scrollLeft; });
+document.querySelector("#transactions-body").addEventListener("click", event => {
+  const button = event.target.closest(".history-details-toggle");
+  if (!button) return;
+  const expanded = button.getAttribute("aria-expanded") === "true";
+  button.setAttribute("aria-expanded", String(!expanded));
+  button.textContent = expanded ? "Szczegóły" : "Zwiń";
+  document.getElementById(button.getAttribute("aria-controls")).hidden = expanded;
+});
+
 function renderFilterOptions() {
   const search = document.querySelector("#history-filter-search").value;
   const query = search.toLocaleLowerCase("pl");
   const visible = filterOptions.filter(value => value.toLocaleLowerCase("pl").includes(query));
   document.querySelector("#history-filter-values").innerHTML = visible.length ? visible.map(value => `<label><input type="checkbox" value="${escapeHtml(value)}" ${filterSelection.has(value) ? "checked" : ""}>${escapeHtml(value)}</label>`).join("") : '<p class="hint">Brak pasujących wartości.</p>';
 }
-document.querySelector("#history-columns").addEventListener("click", event => {
+document.querySelector("#history-panel").addEventListener("click", event => {
   const button = event.target.closest("[data-column]");
   if (!button) return;
   filterColumn = button.dataset.column;
@@ -127,6 +161,10 @@ document.querySelector("#history-filter-apply").addEventListener("click", () => 
 document.querySelector("#history-filter-clear").addEventListener("click", () => {
   historyFilters.delete(filterColumn); historyDialog.close(); render();
 });
+document.querySelector("#history-show-all").addEventListener("click", () => {
+  historyExpanded = !historyExpanded;
+  render();
+});
 document.querySelector("#history-reset").addEventListener("click", () => {
   historyFilters.clear(); historySort = { column: "date", direction: "desc" }; render();
 });
@@ -158,24 +196,32 @@ function render() {
         <td>${position.watchOnly ? "—" : money.format(position.marketValue)}</td><td class="${position.watchOnly ? "" : tone(position.unrealized)}">${position.watchOnly ? "—" : money.format(position.unrealized)}</td></tr>`).join("")
     : '<tr><td colspan="6" class="empty">Brak otwartych pozycji. Przypnij instrument w zakładce Aktywa, aby obserwować jego kurs.</td></tr>';
   const allHistory = calculateOperationHistory(transactions, cashDeposits, cashBalance);
-  const history = prepareHistory(allHistory, saleResults);
+  const filteredHistory = prepareHistory(allHistory, saleResults);
+  const history = historyExpanded ? filteredHistory : filteredHistory.slice(0, 5);
+  const showAll = document.querySelector("#history-show-all");
+  showAll.hidden = filteredHistory.length <= 5;
+  showAll.textContent = historyExpanded ? "Pokaż tylko 5 operacji" : "Pokaż wszystkie operacje";
+  showAll.setAttribute("aria-expanded", String(historyExpanded));
   const operationNames = { BUY: "Kupno", SELL: "Sprzedaż", DEPOSIT: "Zasilenie", WITHDRAWAL: "Wypłata", DIVIDEND: "Wypłata dywidendy" };
   document.querySelector("#transactions-body").innerHTML = history.length
-    ? history.map(item => {
+    ? history.map((item, index) => {
       const sale = item.type === "SELL" ? saleResults.get(item.id) : null;
       const actions = item.isStock
-        ? `<button type="button" class="secondary" data-edit-transaction="${escapeHtml(item.id)}">Edytuj</button> <button class="icon-button" data-remove="${escapeHtml(item.id)}" aria-label="Usuń transakcję">×</button>`
-        : `<button type="button" class="secondary" data-edit-cash="${escapeHtml(item.key)}">Edytuj</button> <button class="icon-button" data-remove-cash="${escapeHtml(item.key)}" aria-label="Usuń operację gotówkową">×</button>`;
-      return `<tr>
-        <td>${escapeHtml(item.date)}</td><td>${item.isStock ? assetLabel(item.ticker) : item.type === "DIVIDEND" ? (item.ticker ? `<strong>${escapeHtml(item.assetName ?? item.ticker)}</strong><small class="asset-ticker">${escapeHtml(item.ticker)}</small>` : "Nieprzypisany emitent — edytuj") : "Gotówka"}</td>
-        <td><span class="pill ${item.cashChangeCents < 0 ? "sell" : "buy"}">${operationNames[item.type]}</span></td>
-        <td>${item.isStock ? formatQuantity(item.quantity) : "—"}</td><td>${item.isStock ? price.format(item.price) : "—"}</td>
-        <td>${money.format(item.isStock ? item.quantity * item.price : item.amount)}</td><td>${item.isStock ? money.format(item.fee) : "—"}</td>
-        <td>${sale ? `${sale.method}${item.costMethod ? "" : " (globalna)"}` : "—"}</td>
-        <td class="${sale ? tone(sale.profit) : ""}" ${sale ? `title="Koszt jednostkowy rozliczony metodą ${sale.method}: ${price.format(sale.averageAcquisitionCost)}"` : ""}>${sale ? money.format(sale.profit) : "—"}</td>
-        <td class="cash-after ${tone(item.cashBalanceAfter)}">${money.format(item.cashBalanceAfter)}</td><td>${actions}</td></tr>`;
+        ? `<button type="button" class="secondary history-icon-button" data-edit-transaction="${escapeHtml(item.id)}" title="Edytuj transakcję" aria-label="Edytuj transakcję">${historyIcon("edit")}</button> <button type="button" class="icon-button history-icon-button" data-remove="${escapeHtml(item.id)}" title="Usuń transakcję" aria-label="Usuń transakcję">${historyIcon("remove")}</button>`
+        : `<button type="button" class="secondary history-icon-button" data-edit-cash="${escapeHtml(item.key)}" title="Edytuj operację gotówkową" aria-label="Edytuj operację gotówkową">${historyIcon("edit")}</button> <button type="button" class="icon-button history-icon-button" data-remove-cash="${escapeHtml(item.key)}" title="Usuń operację gotówkową" aria-label="Usuń operację gotówkową">${historyIcon("remove")}</button>`;
+      const detailId = `history-detail-${index}`;
+      const cell = (label, value, classes = "") => `<td data-label="${label}" class="${classes}">${value}</td>`;
+      return `<tr class="history-operation">
+        ${cell("Data", escapeHtml(item.date))}${cell("Aktywo", item.isStock ? assetLabel(item.ticker, true) : item.type === "DIVIDEND" ? (item.ticker ? `<strong>${escapeHtml(item.assetName ?? item.ticker)}</strong>${item.assetName && item.assetName !== item.ticker ? `<small class="asset-ticker">${escapeHtml(item.ticker)}</small>` : ""}` : "Nieprzypisany emitent — edytuj") : "Gotówka")}
+        ${cell("Typ", `<span class="pill history-type-icon ${item.cashChangeCents < 0 ? "sell" : "buy"}" role="img" tabindex="0" title="${operationNames[item.type]}" aria-label="${operationNames[item.type]}">${item.type === "BUY" ? '<span aria-hidden="true">K</span>' : item.type === "SELL" ? '<span aria-hidden="true">S</span>' : historyIcon(item.type)}</span>`)}
+        ${cell("Liczba", item.isStock ? formatQuantity(item.quantity) : "—")}${cell("Cena", item.isStock ? price.format(item.price) : "—")}
+        ${cell("Wartość", money.format(item.isStock ? item.quantity * item.price : item.amount))}
+        ${cell("Zysk/strata", sale ? money.format(sale.profit) : "—", sale ? tone(sale.profit) : "")}
+        ${cell("Saldo", money.format(item.cashBalanceAfter), `cash-after ${tone(item.cashBalanceAfter)}`)}
+        <td class="history-actions"><button type="button" class="secondary history-details-toggle" aria-expanded="false" aria-controls="${detailId}">Szczegóły</button>${actions}</td></tr>
+        <tr class="history-detail" id="${detailId}" hidden><td colspan="9"><dl><div><dt>Prowizja</dt><dd>${item.isStock ? money.format(item.fee) : "—"}</dd></div><div><dt>Metoda rozliczenia</dt><dd>${sale ? `${sale.method}${item.costMethod ? "" : " (globalna)"}` : "—"}</dd></div>${sale ? `<div><dt>Koszt jednostkowy (${sale.method})</dt><dd>${price.format(sale.averageAcquisitionCost)}</dd></div>` : ""}</dl></td></tr>`;
     }).join("")
-    : `<tr><td colspan="11" class="empty">${allHistory.length ? 'Brak operacji spełniających wybrane filtry.' : 'Dodaj pierwszą operację.'}</td></tr>`;
+    : `<tr><td colspan="9" class="empty">${allHistory.length ? 'Brak operacji spełniających wybrane filtry.' : 'Dodaj pierwszą operację.'}</td></tr>`;
   const totals = positions.reduce((sum, p) => ({ marketValue: sum.marketValue + p.marketValue, cost: sum.cost + p.cost, unrealized: sum.unrealized + p.unrealized, realized: sum.realized + p.realized }), { marketValue: 0, cost: 0, unrealized: 0, realized: 0 });
   const { totalDeposits, returnRate } = calculateTotalReturn(totals.marketValue, cashBalance, cashDeposits);
   setMetric("total-deposits", totalDeposits);
@@ -362,7 +408,6 @@ form.addEventListener("submit", async (event) => {
 
 document.addEventListener("change", async (event) => { if (!event.target.matches(".quote")) return; try { await request(`/api/quotes/${encodeURIComponent(event.target.dataset.ticker)}`, { method: "PUT", body: JSON.stringify({ price: Number(event.target.value) }) }); await refresh(); } catch (caught) { showError(caught); } });
 document.addEventListener("click", async (event) => { const id = event.target.dataset.remove; if (!id) return; try { await request(`/api/transactions/${encodeURIComponent(id)}`, { method: "DELETE" }); await refresh(); } catch (caught) { showError(caught); } });
-document.querySelector("#load-demo").addEventListener("click", async () => { try { await request("/api/demo", { method: "POST" }); await refresh(); } catch (caught) { showError(caught); } });
 document.querySelector("#clear-all").addEventListener("click", async () => { if (!transactions.length || !confirm("Usunąć wszystkie transakcje akcji? Operacje gotówkowe i historia cen zostaną zachowane.")) return; try { await request("/api/state", { method: "DELETE" }); await refresh(); } catch (caught) { showError(caught); } });
 
 const assetForm = document.querySelector("#asset-form");
