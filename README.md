@@ -64,9 +64,9 @@ Przycisk **Archiwizuj** ukrywa instrument z listy i zatrzymuje jego obserwowanie
 
 Każda platforma może mieć jeden symbol dla danego aktywa; para platforma–symbol nie może wskazywać dwóch aktywów. Symbole platform pozostają słownikiem; konfiguracja automatycznego źródła cen jest odrębna.
 
-## Automatyczne kursy: Yahoo Finance i Bankier.pl
+## Automatyczne kursy: Yahoo Finance, Bankier.pl i bossaAPI Notowania
 
-Serwer pobiera kursy wszystkich niezarchiwizowanych instrumentów GPW i NewConnect, również bez transakcji. Działa niezależnie od przeglądarki, domyślnie co 5 minut. Nowe instrumenty są wykrywane w ciągu około 30 sekund; domyślnym dostawcą pozostaje Yahoo Finance.
+Serwer pobiera kursy wszystkich niezarchiwizowanych instrumentów GPW i NewConnect, również bez transakcji. Działa niezależnie od przeglądarki, według harmonogramu: domyślnie co 5 sekund od 08:00 do 18:00 i co 300 sekund poza tym przedziałem (Europe/Warsaw). Serwer sprawdza należne pobrania co sekundę; domyślnym dostawcą pozostaje Yahoo Finance.
 
 W tabeli **Aktywa → Źródło i aliasy kursów** są dwa pola obok siebie: lista dostawców oraz symbol na wybranej platformie. Zmiana pozycji na liście pozwala edytować alias bez przełączania notowań. Aby zmienić domyślne źródło, zaznacz obok symbolu **Domyślny** i kliknij **Zapisz**. Domyślny dostawca ma gwiazdkę i oznaczenie na liście; bieżącego domyślnego źródła nie można odznaczyć bez wskazania innego. Przykłady: PRIME → Yahoo `PRA.WA`, Bankier `PRIME`; 11BIT → Yahoo `11B.WA`, Bankier `11BIT`. Aliasy są zapamiętywane niezależnie od wybranego źródła i głównego tickera. Przełączenie uruchamia pobranie z wybranego źródła; dopiero poprawny kurs staje się podstawą wyceny. Błąd zachowuje poprzednią cenę i źródło, a serwer ponawia próby dla nowej konfiguracji.
 
@@ -74,7 +74,7 @@ Yahoo korzysta z publicznego, nieoficjalnego endpointu bez klucza API. Bankier k
 
 
 - `QUOTES_ENABLED=0` wyłącza automatyczne pobieranie i przycisk pobierania. Domyślnie jest włączone (`1`).
-- `QUOTES_INTERVAL_SECONDS=300` ustala interwał na instrument; minimalna wartość to 60. Docker Compose przekazuje oba ustawienia ze środowiska lub `.env`.
+- Interwały ustala harmonogram opisany poniżej; wcześniejsze `QUOTES_INTERVAL_SECONDS` zostało zastąpione przez `ACTIVITIY_FREQS` i `NONACTIVITY_FREQS`. Minimalny interwał to 1 sekunda. Limity i przerwy dostawcy nadal obowiązują.
 - Przycisk **Pobierz kursy** uruchamia sprawdzenie instrumentów, dla których upłynął interwał; nie omija limitu ani przerwy dostawcy. Jeśli nic nie pobrano z powodu interwału, komunikat podaje liczbę pominiętych instrumentów i najbliższy termin próby.
 - Ikona **↻** przy kursie pozycji i przy symbolu w tabeli aktywów pobiera kurs tylko danego instrumentu i po sukcesie przełącza wycenę na wybranego dostawcę, również gdy wcześniej używano nowszej ceny ręcznej. Pomija interwał tego instrumentu, ale respektuje wyłączenie integracji i przerwę dostawcy. Przy błędzie zachowuje poprzedni kurs i źródło.
 - Znaczniki przy kursach rozróżniają aktywną wycenę zewnętrzną i ręczną oraz pokazują błąd pobierania, brak konfiguracji/danych, wyłączoną integrację lub brak odświeżania. Sukces oznacza udane pobranie, a nie gwarancję świeżego notowania giełdowego; czas ceny pozostaje widoczny poniżej. Dłuższy brak pobrania jest sygnalizowany po większej z wartości: 15 minut lub trzy interwały.
@@ -85,9 +85,71 @@ Yahoo korzysta z publicznego, nieoficjalnego endpointu bez klucza API. Bankier k
 
 Endpointy: `POST /api/quotes/refresh` uruchamia sprawdzenie, `POST /api/quotes/refresh/:ticker` pobiera pojedynczy kurs i przełącza źródło po sukcesie, `PUT /api/price-feeds/:ticker` z `{ "sourceId": "bankier", "symbols": { "yahoo": "PRA.WA", "bankier": "PRIME" } }` zapisuje aliasy i wybranego dostawcę. Można przesłać tylko część aliasów; pozostałe są zachowywane. `makeDefault: false` zapisuje aliasy bez przełączania dostawcy; domyślnie `makeDefault` wynosi `true` dla zgodności z wcześniejszym API. Starszy format `{ "symbol": "PKO.WA" }` nadal wybiera Yahoo. `GET /api/state` zwraca dodatkowo `quoteDetails` (źródło i czasy kursu) i `observedAssets` (statusy pobierania). Domyślne testy używają odpowiedzi kontrolowanych i nie wymagają sieci.
 
+### Harmonogram i dzienny budżet punktów
+
+W `.env` dostępne są następujące ustawienia:
+
+```dotenv
+ACTIVITIY_START=0800
+ACTIVITY_END=1800
+ACTIVITIY_FREQS=5
+NONACTIVITY_FREQS=300
+TOKEN_LIMIT=10000
+```
+
+Obsługiwane są także pisownie `ACTIVITY_START` i `ACTIVITY_FREQS`; mają pierwszeństwo, jeśli podano obie wersje. Godziny zapisujemy jako cztery cyfry HHMM, w strefie **Europe/Warsaw**. Początek aktywności jest włączony do przedziału, koniec wyłączony. Możliwy jest przedział nocny, np. 2200–0600; godziny początku i końca muszą być różne. Harmonogram działa codziennie, także w weekendy. Częstotliwości to całkowite sekundy od 1 do 86400. `TOKEN_LIMIT` jest dziennym budżetem ostrzegawczym punktów bossaAPI, domyślnie 10000; zero oznacza ostrzeżenie przy każdym dodatnim prognozowanym zużyciu.
+
+Przycisk **Odświeżanie kursów** na karcie **Aktywa**, obok **Pobierz kursy**, otwiera edycję tych samych pięciu wartości oraz bieżącą prognozę. Zmiany z GUI obowiązują od razu i są zapisywane w tabeli SQLite `quote_schedule_settings`, więc przetrwają odtworzenie kontenera. GUI nie zmienia fizycznego pliku `.env`. Zmiana danej wartości w `.env` zastępuje jej wcześniejszą wartość z GUI po ponownym uruchomieniu aplikacji. Pozostałe ustawienia z GUI pozostają zachowane; jeśli nowe godziny kolidują ze starymi godzinami GUI, cały harmonogram wraca do konfiguracji `.env`. W Dockerze po edycji `.env` wykonaj `docker compose up -d --force-recreate portfel-gpw`.
+
+Harmonogram obejmuje wszystkich dostawców. Pojedyncze pobranie ikoną ↻ nadal omija interwał, zachowując ograniczenia API. Żądania nie nakładają się: jeśli poprzedni cykl nadal trwa, kolejny czeka; rzeczywista częstotliwość może być niższa przy wolnych odpowiedziach i limitach dostawcy. Zmiana harmonogramu nie przerywa rozpoczętego pobrania.
+
+Prognoza używa liczby niezarchiwizowanych instrumentów ze skonfigurowanym pobieraniem, w tym instrumentów bez pozycji i bez przypięcia. Koszt punktowy dotyczy wyłącznie tych z wybranym dostawcą **bossa**: pakiet 1 instrumentu kosztuje 1 punkt, pakiet 2–20 kosztuje 2 punkty. Liczbę cykli liczymy osobno dla aktywnej i nieaktywnej części bieżącego dnia warszawskiego, z zaokrągleniem w górę. Uwzględniamy dni o 23 i 25 godzinach przy zmianie czasu. Dodajemy koszt jednego odświeżenia metadanych na dobę. Yahoo i Bankier nie zużywają tego budżetu. Gdy pobieranie jest wyłączone, prognoza wynosi zero.
+
+To prognoza przy pełnej taryfie i grupowaniu należnych instrumentów; nie jest licznikiem faktycznie zużytych punktów. Nie uwzględnia rabatów poza sesją, dodatkowych ręcznych pobrań, ponowień i rozdrobnienia pakietów po zmianach konfiguracji. Dla 20 instrumentów bossa i ustawień z przykładu daje **14738 pkt/dzień** (14736 za kursy + 2 za metadane), w zwykłym 24-godzinnym dniu. Jeśli prognoza jest większa niż `TOKEN_LIMIT`, obok metody wyniku pojawia się ostrzeżenie z prognozą i limitem; kliknięcie otwiera harmonogram. Ostrzeżenie nie blokuje pobierania. Twarde ograniczenia dostawcy nadal są respektowane.
+
+Endpointy: `GET /api/quote-schedule` odczytuje konfigurację, aktualny interwał i prognozę; `PUT /api/quote-schedule` zapisuje pełen obiekt `{ activityStart, activityEnd, activityFreqs, nonactivityFreqs, tokenLimit }`. `GET /api/state` zawiera ten sam stan w `quoteSchedule`. Przeglądarka nadal odświeża widok co minutę; częstotliwość serwerowego pobierania cen jest od tego niezależna.
+
+### bossaAPI Notowania — konfiguracja
+
+Integracja korzysta z REST `https://bossaapi.statica.pl/v1`, bez klienta Java i bez dostępu do zleceń lub rachunku. Potrzebny jest **klucz do Notowań**, osobny od klucza transakcyjnego. W lokalnym pliku `.env` w katalogu projektu uzupełnij:
+
+```dotenv
+BOSSA_QUOTES_API_KEY=TU_WPISZ_KLUCZ_DO_NOTOWAN
+```
+
+Plik `.env` jest wykluczony z Git, kontekstu budowania obrazu Docker i dostępu HTTP. Przykładowa konfiguracja bez sekretów znajduje się w `.env.example`; na nowej instalacji skopiuj ją do `.env` i uzupełnij klucz. Ogranicz dostęp do `.env` do użytkownika uruchamiającego aplikację (w Linuxie `chmod 600 .env`). Klucz jest wysyłany w nagłówku `Authorization`, bez umieszczania go w URL, bazie czy logach błędów.
+
+Uruchomienie lokalne:
+
+```bash
+npm start
+```
+
+Serwer automatycznie wczytuje `.env` z bieżącego katalogu przez wbudowany mechanizm Node.js. Zmienne już ustawione w środowisku mają pierwszeństwo. Brak `.env` lub pusty klucz nie blokuje aplikacji ani pozostałych źródeł; próba pobrania ceny bossa pokaże błąd konfiguracji.
+
+W Dockerze:
+
+```bash
+docker compose up -d --build
+```
+
+Compose odczytuje `.env` i przekazuje `BOSSA_QUOTES_API_KEY` wyłącznie do kontenera aplikacji. Plik `.env` nie jest kopiowany do obrazu ani montowany w kontenerze. Nie trzeba już podawać ścieżki do osobnego pliku klucza ani dodawać `-f compose.bossa.yaml`; ten dodatkowy plik pozostaje dla zgodności ze wcześniejszymi poleceniami. Zmienne `BOSSA_QUOTES_KEY_FILE` i `BOSSA_QUOTES_KEY_PATH` zastępuje `BOSSA_QUOTES_API_KEY`.
+
+Po zmianie klucza w `.env` zrestartuj lokalny proces `npm start`, a w Dockerze wykonaj `docker compose up -d --force-recreate portfel-gpw`. Samo `docker compose restart` nie aktualizuje zmiennych kontenera. Ponowne uruchomienie czyści także przerwę po błędzie autoryzacji lub limitu.
+
+W **Aktywa → Źródło i aliasy kursów** wybierz **bossaAPI Notowania**, podaj poprawny ISIN, np. `PLPKO0000016`, lub `GPW:PLPKO0000016`, zaznacz **Domyślny** i zapisz. Alias zostaje zapisany w formacie `GPW:ISIN`. ISIN trzeba dobrać do właściwego aktywa; aplikacja nie zgaduje go z tickera. Samo zapisanie aliasu bez zaznaczenia **Domyślny** zachowuje dotychczasowego dostawcę. Yahoo pozostaje początkowym źródłem nowych aktywów. Przełączenie wyceny następuje dopiero po poprawnym pobraniu ceny.
+
+Przed pobraniem kursu sprawdzamy metadane `/info`: rynek GPW, ISIN, walutę PLN i mnożnik 1; metadane są przechowywane w pamięci do 24 godzin. Jeżeli aktywo ma ISIN w bazie, musi on odpowiadać aliasowi. Inne rynki, waluty i mnożniki nie są obecnie obsługiwane. Kurs `last` pochodzi z `p`, a czas ostatniej transakcji z `t` (sekundy Unix przeliczane na milisekundy). Kurs zamknięcia nie zastępuje brakującej ceny ostatniej transakcji. Czas pobrania jest zapisywany oddzielnie. Powtarzające się dane nie tworzą duplikatów.
+
+Automatyczne odświeżanie grupuje należne instrumenty po maksymalnie 20. Brak jednego instrumentu w odpowiedzi nie blokuje pozostałych. Interwał i przyciski odświeżania działają tak samo jak dla Yahoo i Bankiera; błędy zachowują poprzednią wycenę. Sprawdzamy błędy zarówno w HTTP, jak i w JSON (`op: error`, również przy HTTP 200). Po 429 respektujemy `Retry-After` z minimalną przerwą minutową i sprawdzamy bezpłatny `/limits`. Potwierdzone wyczerpanie limitu miesięcznego wstrzymuje pobieranie do pierwszego dnia kolejnego miesiąca, do 12:00 UTC (zapas na nieokreśloną w dokumentacji strefę resetu). 401/403 wstrzymuje bossa na godzinę, bez zatrzymywania pozostałych dostawców. Przerwy są przechowywane w pamięci procesu.
+
+Publiczny klucz demo `0000` jest odrzucany, ponieważ API zniekształca dane. Testy parsera i integracji używają odpowiedzi kontrolowanych; weryfikacja rzeczywistego dostępu wymaga skonfigurowania własnego klucza. Opóźnienie i dostępność notowań zależą od uprawnień użytkownika. Klucze pilotażowe wygasają zgodnie z okresem wybranym w panelu bossa.
+
+Serwer HTTP udostępnia wyłącznie jawną listę plików interfejsu. Kod serwera, konfiguracja, baza danych i materiały dostawcy nie są dostępne jako pliki statyczne.
+
 ## Historia cen i model bazy
 
-Aplikacja pobiera kursy z Yahoo Finance lub Bankier.pl. Import wcześniejszej historii i wykres historycznej wartości portfela nie są jeszcze zaimplementowane. Ręczne wpisanie kursu dopisuje obserwację z bieżącym czasem zamiast nadpisywać poprzedni kurs.
+Aplikacja pobiera kursy z Yahoo Finance, Bankier.pl lub bossaAPI Notowania. Import wcześniejszej historii i wykres historycznej wartości portfela nie są jeszcze zaimplementowane. Ręczne wpisanie kursu dopisuje obserwację z bieżącym czasem zamiast nadpisywać poprzedni kurs.
 
 - `schema_migrations` zapisuje wersje migracji i czas ich zastosowania.
 - `assets` ma stały UUID, ticker, nazwę, rynek (`XWAR`), walutę (`PLN`), opcjonalny ISIN i czas archiwizacji. Unikalna jest para rynek–ticker. Obecny interfejs i obliczenia nadal obsługują GPW/PLN.

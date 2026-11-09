@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { mkdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { extname, join, normalize } from "node:path";
+import { extname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { calculatePortfolio, transactionCashCents } from "./portfolio.js";
 import { createAssetStore } from "./assets.js";
@@ -9,6 +9,14 @@ import { createSettingsStore } from "./settings.js";
 import { migrateDatabase, priceToUnits } from "./database.js";
 import { createPriceStore } from "./prices.js";
 import { createQuoteCollector } from "./quote-collector.js";
+import { providerNames } from "./providers.js";
+import { createQuoteScheduleStore } from "./quote-schedule-store.js";
+import { scheduleInterval, estimateDailyTokens } from "./quote-schedule.js";
+import { loadEnvFile } from "node:process";
+
+try { loadEnvFile(); } catch (error) {
+  if (error.code !== 'ENOENT') throw new Error('Nie można odczytać pliku .env. Sprawdź jego uprawnienia i format.');
+}
 
 const port = Number(process.env.PORT ?? 3000);
 const dataDir = process.env.DATA_DIR ?? "./data";
@@ -19,10 +27,13 @@ migrateDatabase(db);
 const settings = createSettingsStore(db);
 const assets = createAssetStore(db);
 const prices = createPriceStore(db);
+const quoteSchedule = createQuoteScheduleStore(db);
 const collector = createQuoteCollector(db, prices, {
-  enabled: process.env.QUOTES_ENABLED !== "0", intervalSeconds: Number(process.env.QUOTES_INTERVAL_SECONDS ?? 300),
+  enabled: process.env.QUOTES_ENABLED !== "0", getIntervalSeconds: time => scheduleInterval(quoteSchedule.get(), time),
 });
 
+// Serve only browser assets; configuration, credentials and SQLite are private.
+const publicFiles = new Set(['index.html', 'favicon.svg', 'styles.css', 'app.js', 'theme.js', 'legacy-worker.js', 'portfolio.js', 'quote-status.js', 'providers.js', 'quote-schedule.js']);
 const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8", ".svg": "image/svg+xml" };
 const getTransactions = () => db.prepare(`SELECT t.id, t.created_at AS createdAt, t.date, a.ticker, t.type, t.quantity, t.price, t.fee, t.cost_method AS costMethod
   FROM transactions t JOIN assets a ON a.id = t.asset_id ORDER BY t.date, t.created_at`).all();
@@ -39,8 +50,20 @@ async function body(request) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
 }
 
+function scheduleState() {
+  collector.updateInterval();
+  const config = quoteSchedule.get();
+  return { config, intervalSeconds: scheduleInterval(config), estimate: estimateDailyTokens(config, prices.listObserved(), { enabled: process.env.QUOTES_ENABLED !== '0' }) };
+}
+
 async function api(request, response, url) {
-  if (request.method === "GET" && url.pathname === "/api/state") return sendJson(response, 200, { transactions: getTransactions(), quotes: getQuotes(), assets: assets.list(), settings: settings.get(), cashDeposits: settings.deposits(), cashOperations: settings.cashOperations(), quoteDetails: prices.getQuoteDetails(), observedAssets: prices.listObserved() });
+  if (url.pathname === '/api/quote-schedule' && request.method === 'GET') return sendJson(response, 200, scheduleState());
+  if (url.pathname === '/api/quote-schedule' && request.method === 'PUT') {
+    quoteSchedule.save(await body(request));
+    collector.updateInterval();
+    return sendJson(response, 200, scheduleState());
+  }
+  if (request.method === "GET" && url.pathname === "/api/state") { const schedule = scheduleState(); return sendJson(response, 200, { transactions: getTransactions(), quotes: getQuotes(), assets: assets.list(), settings: settings.get(), cashDeposits: settings.deposits(), cashOperations: settings.cashOperations(), quoteDetails: prices.getQuoteDetails(), observedAssets: prices.listObserved(), quoteSchedule: schedule }); }
   if (request.method === "GET" && url.pathname === "/api/observed-assets") return sendJson(response, 200, prices.listObserved());
   if (request.method === "POST" && url.pathname === "/api/quotes/refresh") return sendJson(response, 200, await collector.run());
   if (request.method === "POST" && url.pathname.startsWith("/api/quotes/refresh/")) {
@@ -48,11 +71,11 @@ async function api(request, response, url) {
     const asset = db.prepare("SELECT id FROM assets WHERE ticker = ? AND market = 'XWAR' AND archived_at IS NULL").get(ticker);
     if (!asset) return sendJson(response, 404, { error: "Nie znaleziono aktywnego instrumentu." });
     const feed = db.prepare("SELECT source_id FROM asset_price_feeds WHERE asset_id = ?").get(asset.id);
-    if (feed && !["yahoo", "bankier"].includes(feed.source_id)) return sendJson(response, 409, { error: "Instrument ma skonfigurowane inne źródło." });
+    if (feed && !Object.hasOwn(providerNames, feed.source_id)) return sendJson(response, 409, { error: "Instrument ma skonfigurowane inne źródło." });
     const result = await collector.refreshAsset(asset.id);
     const current = prices.listObserved().find(item => item.assetId === asset.id);
     if (result.status === "disabled") return sendJson(response, 409, { error: "Automatyczne pobieranie jest wyłączone." });
-    if (result.status === "backoff") return sendJson(response, 429, { error: "Dostawca ograniczył dostęp. Spróbuj ponownie po zakończeniu przerwy.", retryAt: result.retryAt });
+    if (result.status === "backoff") return sendJson(response, 429, { error: current?.lastError ?? "Dostawca ograniczył dostęp. Spróbuj ponownie po zakończeniu przerwy.", retryAt: result.retryAt });
     if (!result.updated) return sendJson(response, 502, { error: current?.lastError ?? "Nie pobrano kursu. Sprawdź konfigurację lub archiwizację instrumentu." });
     return sendJson(response, 200, { ...result, quote: prices.getQuoteDetails()[ticker] });
   }
@@ -141,7 +164,8 @@ const server = createServer(async (request, response) => {
     const url = new URL(request.url, `http://${request.headers.host}`);
     if (url.pathname.startsWith("/api/")) return await api(request, response, url);
     const requested = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
-    const safePath = normalize(requested).replace(/^(\.\.[/\\])+/, "");
+    if (!publicFiles.has(requested)) return sendJson(response, 404, { error: "Nie znaleziono pliku." });
+    const safePath = requested;
     const content = await readFile(join(process.cwd(), safePath));
     response.writeHead(200, { "Content-Type": mime[extname(safePath)] ?? "application/octet-stream", "Cache-Control": "no-cache" });
     response.end(content);

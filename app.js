@@ -1,6 +1,7 @@
 import { calculatePortfolioDetails, formatQuantity, transactionCashCents, calculateOperationHistory, calculateTotalReturn, selectWatchedPositions } from "./portfolio.js";
 import { quoteStatus, quoteTooltip } from "./quote-status.js";
 import { providerNames } from "./providers.js";
+import { validateSchedule, estimateDailyTokens } from "./quote-schedule.js";
 
 const money = new Intl.NumberFormat("pl-PL", { style: "currency", currency: "PLN" });
 const percent = new Intl.NumberFormat("pl-PL", { style: "percent", minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -11,6 +12,7 @@ let transactions = [];
 let quotes = {};
 let quoteDetails = {};
 let observedAssets = [];
+let quoteScheduleState = null;
 let assets = [];
 let defaultCostMethod = "FIFO";
 let cashBalance = 0;
@@ -175,6 +177,8 @@ async function refresh() {
   quotes = state.quotes;
   quoteDetails = state.quoteDetails ?? {};
   observedAssets = state.observedAssets ?? [];
+  quoteScheduleState = state.quoteSchedule;
+  renderBudgetWarning();
   assets = state.assets;
   defaultCostMethod = state.settings.costMethod;
   cashBalance = state.settings.cashBalance ?? 0;
@@ -422,7 +426,7 @@ function feedDraft(asset) {
     symbols: Object.fromEntries(Object.entries(providerNames).map(([id,name]) => [id,
       feed?.aliases?.[id] ?? (feed?.sourceId === id ? feed.sourceSymbol : null)
       ?? asset.symbols.find(item => item.platform.toLowerCase() === name.toLowerCase())?.symbol
-      ?? (id === 'yahoo' ? `${asset.ticker}.WA` : asset.ticker)])),
+      ?? (id === 'yahoo' ? `${asset.ticker}.WA` : id === 'bossa' ? (feed?.isin ? `GPW:${feed.isin}` : '') : asset.ticker)])),
   };
 }
 function feedEditor(asset) {
@@ -430,7 +434,7 @@ function feedEditor(asset) {
   const isDefault = draft.selected === draft.defaultSource;
   return `<div class="feed-fields">
     <label>Dostawca<select data-feed-source="${escapeHtml(asset.ticker)}" aria-label="Dostawca kursów ${escapeHtml(asset.ticker)}">${Object.entries(providerNames).map(([id,name]) => `<option value="${id}" ${id === draft.selected ? "selected" : ""} ${id === draft.defaultSource ? 'class="default-provider"' : ""}>${name}${id === draft.defaultSource ? ' ★ (domyślny)' : ''}</option>`).join("")}</select></label>
-    <label>Symbol instrumentu<input data-provider-alias="${draft.selected}" aria-label="Alias ${providerNames[draft.selected]} ${escapeHtml(asset.ticker)}" value="${escapeHtml(draft.symbols[draft.selected])}" maxlength="67"></label>
+    <label>${draft.selected === 'bossa' ? 'ISIN lub GPW:ISIN' : 'Symbol instrumentu'}<input placeholder="${draft.selected === 'bossa' ? 'np. GPW:PLPKO0000016' : ''}" data-provider-alias="${draft.selected}" aria-label="Alias ${providerNames[draft.selected]} ${escapeHtml(asset.ticker)}" value="${escapeHtml(draft.symbols[draft.selected])}" maxlength="67"></label>
     <label class="feed-default"><input type="checkbox" data-feed-default="${escapeHtml(asset.ticker)}" ${isDefault ? 'checked disabled' : ''} title="Aby zmienić domyślnego dostawcę, wybierz innego i zaznacz to pole">Domyślny</label>
     </div><button type="button" class="secondary" data-save-feed="${escapeHtml(asset.ticker)}">Zapisz</button>${externalQuoteButton(asset.ticker)}${quoteCaption(asset.ticker)}<small class="asset-ticker">${escapeHtml(feedCaption(asset.ticker))}</small>`;
 }
@@ -528,7 +532,7 @@ document.querySelector("#assets-body").addEventListener("click", async event => 
       const changedDefault = draft.defaultSource !== (feed?.sourceId ?? 'yahoo');
       const sourceId = changedDefault ? draft.defaultSource : draft.selected;
       const makeDefault = changedDefault || sourceId === draft.defaultSource;
-      await request(`/api/price-feeds/${encodeURIComponent(ticker)}`, { method: "PUT", body: JSON.stringify({ sourceId, symbols: draft.symbols, makeDefault }) });
+      await request(`/api/price-feeds/${encodeURIComponent(ticker)}`, { method: "PUT", body: JSON.stringify({ sourceId, symbols: Object.fromEntries(Object.entries(draft.symbols).filter(([id, value]) => id === sourceId || value.trim())), makeDefault }) });
       feedDrafts.delete(ticker);
       if (makeDefault) {
         try {
@@ -606,7 +610,7 @@ refreshQuotes.addEventListener("click", async () => {
 });
 setInterval(() => {
   // Do not overwrite fields while a user edits a transaction, asset or provider symbol.
-  if (document.hidden || operationDialog.open || feedDrafts.size > 0 || editingTransactionId || !assetForm.hidden || savingTransaction || document.activeElement?.matches("input, select, textarea")) return;
+  if (document.hidden || scheduleDialog.open || operationDialog.open || feedDrafts.size > 0 || editingTransactionId || !assetForm.hidden || savingTransaction || document.activeElement?.matches("input, select, textarea")) return;
   refresh().catch(showError);
 }, 60_000);
 
@@ -630,4 +634,63 @@ document.addEventListener("click", async event => {
     });
     status.textContent = message;
   }
+});
+
+
+const scheduleDialog = document.querySelector('#quote-schedule-dialog');
+const scheduleForm = document.querySelector('#quote-schedule-form');
+const scheduleError = document.querySelector('#quote-schedule-error');
+const pointFormat = new Intl.NumberFormat('pl-PL');
+function renderBudgetWarning() {
+  const warning = document.querySelector('#quote-budget-warning');
+  const estimate = quoteScheduleState?.estimate;
+  warning.hidden = !estimate?.warning;
+  warning.textContent = estimate?.warning ? `⚠ ${pointFormat.format(estimate.dailyTokens)} / ${pointFormat.format(estimate.tokenLimit)} pkt/dzień` : '';
+  warning.title = 'Przewidywane dzienne zużycie przekracza limit. Kliknij, aby zmienić harmonogram.';
+}
+function scheduleInput() {
+  return validateSchedule({
+    activityStart: scheduleForm.elements.activityStart.value.replace(':', ''),
+    activityEnd: scheduleForm.elements.activityEnd.value.replace(':', ''),
+    activityFreqs: scheduleForm.elements.activityFreqs.valueAsNumber,
+    nonactivityFreqs: scheduleForm.elements.nonactivityFreqs.valueAsNumber,
+    tokenLimit: scheduleForm.elements.tokenLimit.valueAsNumber,
+  });
+}
+function previewSchedule() {
+  const label = document.querySelector('#quote-schedule-estimate');
+  try {
+    const estimate = estimateDailyTokens(scheduleInput(), observedAssets, { enabled: quoteScheduleState?.estimate.enabled ?? true });
+    label.textContent = `${estimate.date}: ${estimate.trackedInstruments} śledzonych instrumentów, w tym ${estimate.bossaInstruments} z bossa. Prognoza: ${pointFormat.format(estimate.dailyTokens)} pkt/dzień, limit: ${pointFormat.format(estimate.tokenLimit)}.${estimate.warning ? ' ⚠ Przekroczony budżet dzienny.' : ''}${estimate.enabled ? '' : ' Pobieranie jest wyłączone.'}`;
+    label.classList.toggle('negative', estimate.warning);
+    scheduleError.textContent = '';
+  } catch (error) { label.textContent = ''; scheduleError.textContent = error.message; }
+}
+async function openSchedule() {
+  try {
+    // Use current feeds, including changes made by another browser tab.
+    await refresh();
+    for (const [key, value] of Object.entries(quoteScheduleState.config)) {
+      scheduleForm.elements[key].value = key === 'activityStart' || key === 'activityEnd' ? `${value.slice(0, 2)}:${value.slice(2)}` : value;
+    }
+    scheduleError.textContent = '';
+    previewSchedule();
+    scheduleDialog.showModal();
+  } catch (error) { document.querySelector('#settings-status').textContent = error.message; }
+}
+document.querySelector('#open-quote-schedule').addEventListener('click', openSchedule);
+document.querySelector('#quote-budget-warning').addEventListener('click', openSchedule);
+document.querySelector('#close-quote-schedule').addEventListener('click', () => scheduleDialog.close());
+scheduleForm.addEventListener('input', previewSchedule);
+scheduleForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  const button = scheduleForm.querySelector('[type="submit"]');
+  button.disabled = true;
+  try {
+    await request('/api/quote-schedule', { method: 'PUT', body: JSON.stringify(scheduleInput()) });
+    await refresh();
+    scheduleDialog.close();
+    document.querySelector('#settings-status').textContent = 'Zapisano harmonogram. Nowe interwały obowiązują od razu.';
+  } catch (error) { scheduleError.textContent = error.message; }
+  finally { button.disabled = false; }
 });

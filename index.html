@@ -20,6 +20,7 @@
             </nav>
           </div>
           <div class="header-controls">
+          <button id="quote-budget-warning" class="budget-warning" type="button" hidden aria-label="Ostrzeżenie o dziennym limicie punktów API"></button>
           <label class="cost-method-control" title="Globalna metoda wyliczania zysku/straty. Metoda wybrana dla pojedynczej sprzedaży ma pierwszeństwo.">Metoda wyniku<select id="global-cost-method" aria-label="Globalna metoda wyliczania zysku i straty"><option value="FIFO">FIFO</option><option value="AVP">AVP</option></select></label>
           <button id="theme-toggle" class="secondary" type="button" aria-label="Włącz ciemny motyw" title="Włącz ciemny motyw">
             <svg class="theme-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.9 13A9 9 0 0 1 11 3.1 9 9 0 1 0 20.9 13Z" /></svg>
@@ -29,6 +30,22 @@
         </div>
         <p id="settings-status" role="status"></p>
       </header>
+
+      <dialog id="quote-schedule-dialog" aria-labelledby="quote-schedule-heading">
+        <div class="operation-heading"><h2 id="quote-schedule-heading">Odświeżanie kursów</h2><button id="close-quote-schedule" type="button" class="secondary">Zamknij</button></div>
+        <p>Godziny w strefie Europe/Warsaw. Okres aktywności może przechodzić przez północ. Harmonogram działa codziennie.</p>
+        <form id="quote-schedule-form">
+          <label>Początek aktywności<input name="activityStart" type="time" required></label>
+          <label>Koniec aktywności<input name="activityEnd" type="time" required></label>
+          <label>Co ile sekund w okresie aktywności<input name="activityFreqs" type="number" min="1" max="86400" step="1" required></label>
+          <label>Co ile sekund poza aktywnością<input name="nonactivityFreqs" type="number" min="1" max="86400" step="1" required></label>
+          <label>Dzienny limit punktów API<input name="tokenLimit" type="number" min="0" max="1000000000" step="1" required></label>
+          <p id="quote-schedule-estimate" class="operation-wide" aria-live="polite"></p>
+          <p class="operation-wide hint">Prognoza dotyczy punktów bossaAPI: zapytania po maks. 20 instrumentów, z odświeżeniem metadanych. Pełna taryfa, bez rabatów poza sesją. Ręczne pobrania i ponowienia mogą zwiększyć zużycie. Ostrzeżenie nie blokuje pobierania.</p>
+          <p id="quote-schedule-error" class="operation-wide error" role="alert"></p>
+          <div class="operation-footer"><button type="submit">Zapisz harmonogram</button></div>
+        </form>
+      </dialog>
 
       <div id="portfolio-view">
       <section class="summary" aria-label="Podsumowanie portfela">
@@ -100,7 +117,11 @@
         <div class="panel-heading"><div><p class="eyebrow">Słownik portfela</p><h2 id="assets-heading">Aktywa</h2></div><button id="new-asset" type="button">Dodaj aktywo</button></div>
         <p class="hint">Zmień nazwę widoczną w portfelu i przypisz symbole lub nazwy z innych platform. Archiwizacja zatrzymuje obserwowanie instrumentu i zachowuje jego transakcje, symbole oraz historię cen. Aby przywrócić instrument, dodaj ponownie ten sam ticker.</p>
         <p class="hint">Wybierz dostawcę i edytuj jego symbol, np. PRA.WA w Yahoo lub PRIME w Bankierze. Zaznacz „Domyślny”, aby używać tego źródła do pobierania kursów, i kliknij „Zapisz”. Domyślny dostawca jest oznaczony gwiazdką na liście. Pod ceną widoczny jest czas notowania.</p>
-        <button id="refresh-quotes" class="secondary" type="button">Pobierz kursy</button><p id="quotes-status" role="status"></p>
+        <div class="asset-actions">
+          <button id="refresh-quotes" class="secondary" type="button">Pobierz kursy</button>
+          <button id="open-quote-schedule" class="secondary" type="button">Odświeżanie kursów</button>
+        </div>
+        <p id="quotes-status" role="status"></p>
         <div class="table-wrap"><table class="assets-table"><thead><tr><th>Nazwa</th><th>Ticker</th><th>Symbole platform</th><th>Źródło i aliasy kursów</th><th>Akcje</th></tr></thead><tbody id="assets-body"></tbody></table></div>
         <form id="asset-form" hidden>
           <h3 id="asset-editor-heading">Dodaj aktywo</h3>

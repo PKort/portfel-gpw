@@ -1,5 +1,10 @@
 .git
 .cursor
+.env
+.env.*
+Dokumentacja bossaAPI - Pilotaz.pdf
+bossaAPI_client_0_1.zip
+*:Zone.Identifier
 data
 node_modules
 npm-debug.log

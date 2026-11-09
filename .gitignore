@@ -1,4 +1,11 @@
 data/
 node_modules/
 .env
+.env.*
+!.env.example
 backups/
+
+# Local supplier materials for the bossaAPI pilot.
+/Dokumentacja bossaAPI - Pilotaz.pdf
+/bossaAPI_client_0_1.zip
+*:Zone.Identifier

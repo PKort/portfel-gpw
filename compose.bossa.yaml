@@ -1,0 +1,5 @@
+# Compatibility for existing commands with both -f files; compose.yaml also loads the key.
+services:
+  portfel-gpw:
+    environment:
+      BOSSA_QUOTES_API_KEY: ${BOSSA_QUOTES_API_KEY:-}

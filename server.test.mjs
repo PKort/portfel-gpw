@@ -22,11 +22,14 @@ try {
     });
   });
   const base = `http://127.0.0.1:${port}`;
-  for (const path of ["/", "/index.html", "/app.js?v=15", "/portfolio.js", "/legacy-worker.js", "/styles.css"]) {
+  for (const path of ["/", "/index.html", "/app.js?v=15", "/portfolio.js", "/legacy-worker.js", "/styles.css", "/quote-schedule.js"]) {
     const response = await fetch(base + path);
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("cache-control"), "no-cache", path);
     await response.text();
+  }
+  for (const path of ['/server.js', '/bossa.js', '/package.json', '/.env', '/data/portfolio.db', '/Dokumentacja%20bossaAPI%20-%20Pilotaz.pdf', '/bossaAPI_client_0_1.zip']) {
+    assert.equal((await fetch(base + path)).status, 404, path);
   }
   for (const path of ["/api/state", "/api/missing"]) {
     const response = await fetch(base + path);
@@ -37,8 +40,23 @@ try {
     const response = await fetch(base + path, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: response.status, body: await response.json() };
   };
+  const initialSchedule = (await request('/api/quote-schedule')).body;
+  assert.equal(initialSchedule.estimate.enabled, false);
+  assert.equal(initialSchedule.estimate.dailyTokens, 0);
+  const nextSchedule = { activityStart: '2200', activityEnd: '0600', activityFreqs: 5, nonactivityFreqs: 300, tokenLimit: 1000 };
+  const savedSchedule = await request('/api/quote-schedule', 'PUT', nextSchedule);
+  assert.equal(savedSchedule.status, 200);
+  assert.deepEqual(savedSchedule.body.config, nextSchedule);
+  assert.deepEqual((await request('/api/state')).body.quoteSchedule.config, nextSchedule);
+  for (const invalid of [null, {}, { ...nextSchedule, activityFreqs: 0 }, { ...nextSchedule, activityStart: '2500' }, { ...nextSchedule, tokenLimit: -1 }]) {
+    assert.equal((await request('/api/quote-schedule', 'PUT', invalid)).status, 400);
+    assert.deepEqual((await request('/api/quote-schedule')).body.config, nextSchedule);
+  }
+  assert.equal((await request('/api/quote-schedule', 'PUT', initialSchedule.config)).status, 200);
   const page = await (await fetch(base + "/")).text();
   assert.match(page, /id="assets-view"/);
+  assert.match(page, /id="quote-budget-warning"/);
+  assert.match(page, /id="quote-schedule-form"/);
   assert.match(page, /Saldo gotówki po operacji/);
   assert.match(page, /Wszystkie operacje/);
   assert.match(page, /id="total-return"/);
@@ -91,6 +109,14 @@ try {
   assert.equal((await request("/api/price-feeds/SECOND", "PUT", { sourceId: "bankier", symbols: { bankier: "https://example.com" } })).status, 400);
   assert.equal((await request("/api/price-feeds/SECOND", "PUT", { sourceId: "unknown", symbols: {} })).status, 400);
   assert.deepEqual((await request("/api/observed-assets")).body.find(asset => asset.ticker === "SECOND").aliases, secondFeed.aliases);
+  assert.equal((await request('/api/price-feeds/SECOND', 'PUT', { sourceId: 'bossa', symbols: { bossa: 'plpko0000016' } })).status, 200);
+  const bossaFeed = (await request('/api/observed-assets')).body.find(asset => asset.ticker === 'SECOND');
+  assert.equal(bossaFeed.sourceId, 'bossa');
+  assert.equal(bossaFeed.sourceSymbol, 'GPW:PLPKO0000016');
+  assert.equal(bossaFeed.aliases.yahoo, 'PKO.WA');
+  assert.equal((await request('/api/quotes/refresh/SECOND', 'POST')).status, 409); // Global disable, not unsupported provider.
+  assert.equal((await request('/api/price-feeds/SECOND', 'PUT', { sourceId: 'bossa', symbols: { bossa: 'PLPKO0000017' } })).status, 400);
+  assert.equal((await request('/api/state')).body.quotes.NEW, 25);
   const edited = { ...transaction, ticker: "EDIT", date: "2026-01-02", quantity: 12, price: 32.855, fee: 2 };
   const updated = await request("/api/transactions/test-buy", "PUT", { ...edited, id: "ignored", createdAt: 999 });
   assert.equal(updated.status, 200);
