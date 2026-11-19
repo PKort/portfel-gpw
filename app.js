@@ -1,7 +1,7 @@
 import { calculatePortfolioDetails, formatQuantity, transactionCashCents, calculateOperationHistory, calculateTotalReturn, selectWatchedPositions } from "./portfolio.js";
 import { quoteStatus, quoteTooltip } from "./quote-status.js";
 import { providerNames } from "./providers.js";
-import { validateSchedule, estimateDailyTokens } from "./quote-schedule.js";
+import { validateSchedule, estimateDailyTokens, scheduleInterval } from "./quote-schedule.js";
 
 const money = new Intl.NumberFormat("pl-PL", { style: "currency", currency: "PLN" });
 const percent = new Intl.NumberFormat("pl-PL", { style: "percent", minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -13,6 +13,10 @@ let quotes = {};
 let quoteDetails = {};
 let observedAssets = [];
 let quoteScheduleState = null;
+let lastStateRead = -Infinity;
+let explicitRefreshVersion = 0;
+let explicitRefreshes = 0;
+let polling = false;
 let assets = [];
 let defaultCostMethod = "FIFO";
 let cashBalance = 0;
@@ -172,7 +176,18 @@ document.querySelector("#history-reset").addEventListener("click", () => {
 });
 
 async function refresh() {
-  const state = await request("/api/state");
+  explicitRefreshVersion++;
+  explicitRefreshes++;
+  lastStateRead = performance.now();
+  try {
+    applyState(await request("/api/state"));
+    lastStateRead = performance.now();
+  } finally {
+    explicitRefreshes--;
+  }
+}
+
+function applyState(state) {
   transactions = state.transactions;
   quotes = state.quotes;
   quoteDetails = state.quoteDetails ?? {};
@@ -192,7 +207,7 @@ async function refresh() {
 
 function render() {
   const { positions, saleResults } = calculatePortfolioDetails(transactions, quotes, defaultCostMethod);
-  renderAssets(positions);
+  renderAssets();
   const open = selectWatchedPositions(positions, assets, quotes);
   document.querySelector("#positions-body").innerHTML = open.length
     ? open.map((position) => `<tr><td><div class="watched-asset">${assetLabel(position.ticker)}${position.pinned ? `<button type="button" class="pin-button" data-pin="${escapeHtml(position.ticker)}" aria-pressed="true" title="Odepnij z obserwowanych" aria-label="Odepnij ${escapeHtml(position.ticker)}">★</button>` : ""}${position.watchOnly ? '<span class="watch-only">Obserwowane</span>' : ""}</div></td><td>${position.watchOnly ? "—" : formatQuantity(position.quantity)}</td>
@@ -207,13 +222,16 @@ function render() {
   showAll.textContent = historyExpanded ? "Pokaż tylko 5 operacji" : "Pokaż wszystkie operacje";
   showAll.setAttribute("aria-expanded", String(historyExpanded));
   const operationNames = { BUY: "Kupno", SELL: "Sprzedaż", DEPOSIT: "Zasilenie", WITHDRAWAL: "Wypłata", DIVIDEND: "Wypłata dywidendy" };
-  document.querySelector("#transactions-body").innerHTML = history.length
+  const historyBody = document.querySelector("#transactions-body");
+  const expandedOperations = new Set(Array.from(historyBody.querySelectorAll('[aria-expanded="true"][data-operation-key]'), button => button.dataset.operationKey));
+  historyBody.innerHTML = history.length
     ? history.map((item, index) => {
       const sale = item.type === "SELL" ? saleResults.get(item.id) : null;
       const actions = item.isStock
         ? `<button type="button" class="secondary history-icon-button" data-edit-transaction="${escapeHtml(item.id)}" title="Edytuj transakcję" aria-label="Edytuj transakcję">${historyIcon("edit")}</button> <button type="button" class="icon-button history-icon-button" data-remove="${escapeHtml(item.id)}" title="Usuń transakcję" aria-label="Usuń transakcję">${historyIcon("remove")}</button>`
         : `<button type="button" class="secondary history-icon-button" data-edit-cash="${escapeHtml(item.key)}" title="Edytuj operację gotówkową" aria-label="Edytuj operację gotówkową">${historyIcon("edit")}</button> <button type="button" class="icon-button history-icon-button" data-remove-cash="${escapeHtml(item.key)}" title="Usuń operację gotówkową" aria-label="Usuń operację gotówkową">${historyIcon("remove")}</button>`;
       const detailId = `history-detail-${index}`;
+      const expanded = expandedOperations.has(item.key);
       const cell = (label, value, classes = "") => `<td data-label="${label}" class="${classes}">${value}</td>`;
       return `<tr class="history-operation">
         ${cell("Data", escapeHtml(item.date))}${cell("Aktywo", item.isStock ? assetLabel(item.ticker, true) : item.type === "DIVIDEND" ? (item.ticker ? `<strong>${escapeHtml(item.assetName ?? item.ticker)}</strong>${item.assetName && item.assetName !== item.ticker ? `<small class="asset-ticker">${escapeHtml(item.ticker)}</small>` : ""}` : "Nieprzypisany emitent — edytuj") : "Gotówka")}
@@ -222,8 +240,8 @@ function render() {
         ${cell("Wartość", money.format(item.isStock ? item.quantity * item.price : item.amount))}
         ${cell("Zysk/strata", sale ? money.format(sale.profit) : "—", sale ? tone(sale.profit) : "")}
         ${cell("Saldo", money.format(item.cashBalanceAfter), `cash-after ${tone(item.cashBalanceAfter)}`)}
-        <td class="history-actions"><button type="button" class="secondary history-details-toggle" aria-expanded="false" aria-controls="${detailId}">Szczegóły</button>${actions}</td></tr>
-        <tr class="history-detail" id="${detailId}" hidden><td colspan="9"><dl><div><dt>Prowizja</dt><dd>${item.isStock ? money.format(item.fee) : "—"}</dd></div><div><dt>Metoda rozliczenia</dt><dd>${sale ? `${sale.method}${item.costMethod ? "" : " (globalna)"}` : "—"}</dd></div>${sale ? `<div><dt>Koszt jednostkowy (${sale.method})</dt><dd>${price.format(sale.averageAcquisitionCost)}</dd></div>` : ""}</dl></td></tr>`;
+        <td class="history-actions"><button type="button" class="secondary history-details-toggle" data-operation-key="${escapeHtml(item.key)}" aria-expanded="${expanded}" aria-controls="${detailId}">${expanded ? "Zwiń" : "Szczegóły"}</button>${actions}</td></tr>
+        <tr class="history-detail" id="${detailId}" ${expanded ? "" : "hidden"}><td colspan="9"><dl><div><dt>Prowizja</dt><dd>${item.isStock ? money.format(item.fee) : "—"}</dd></div><div><dt>Metoda rozliczenia</dt><dd>${sale ? `${sale.method}${item.costMethod ? "" : " (globalna)"}` : "—"}</dd></div>${sale ? `<div><dt>Koszt jednostkowy (${sale.method})</dt><dd>${price.format(sale.averageAcquisitionCost)}</dd></div>` : ""}</dl></td></tr>`;
     }).join("")
     : `<tr><td colspan="9" class="empty">${allHistory.length ? 'Brak operacji spełniających wybrane filtry.' : 'Dodaj pierwszą operację.'}</td></tr>`;
   const totals = positions.reduce((sum, p) => ({ marketValue: sum.marketValue + p.marketValue, cost: sum.cost + p.cost, unrealized: sum.unrealized + p.unrealized, realized: sum.realized + p.realized }), { marketValue: 0, cost: 0, unrealized: 0, realized: 0 });
@@ -248,9 +266,12 @@ function quoteCaption(ticker, compact = false) {
     const external = quote && Object.hasOwn(providerNames, quote.sourceId);
     const manual = quote && !external;
     const detail = quoteTooltip(feed, quote, providerNames[quote?.sourceId]);
+    let markerClass = "quote-info-muted";
+    if (external && status.stale) markerClass = "quote-info-stale";
+    if (external && status.tone === "success") markerClass = "quote-info-active";
     const hand = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 12V5a1.5 1.5 0 0 1 3 0v6-8a1.5 1.5 0 0 1 3 0v8-6a1.5 1.5 0 0 1 3 0v7-4a1.5 1.5 0 0 1 3 0v7c0 4-2.5 7-6 7h-1c-2 0-3.5-1-5-3l-4-5a1.5 1.5 0 0 1 2-2l2 2"/></svg>';
     const dot = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="5" fill="currentColor"/></svg>';
-    return `<button type="button" class="quote-info ${external && status.tone === "success" ? "quote-info-active" : "quote-info-muted"}" title="${escapeHtml(detail)}" aria-label="${escapeHtml(detail)}">${manual ? hand : dot}</button>`;
+    return `<button type="button" class="quote-info ${markerClass}" title="${escapeHtml(detail)}" aria-label="${escapeHtml(detail)}">${manual ? hand : dot}</button>`;
   }
   const badge = `<span class="quote-status quote-status-${status.tone}" title="${escapeHtml(status.detail)}">${escapeHtml(status.label)}</span>`;
   if (!quote) return badge;
@@ -588,8 +609,6 @@ assetForm.addEventListener("submit", async event => {
   finally { submit.disabled = false; }
 });
 
-refresh().catch(showError);
-
 const refreshQuotes = document.querySelector("#refresh-quotes");
 refreshQuotes.addEventListener("click", async () => {
   refreshQuotes.disabled = true;
@@ -608,11 +627,7 @@ refreshQuotes.addEventListener("click", async () => {
   } catch (caught) { status.textContent = caught.message; }
   finally { refreshQuotes.disabled = false; }
 });
-setInterval(() => {
-  // Do not overwrite fields while a user edits a transaction, asset or provider symbol.
-  if (document.hidden || scheduleDialog.open || operationDialog.open || feedDrafts.size > 0 || editingTransactionId || !assetForm.hidden || savingTransaction || document.activeElement?.matches("input, select, textarea")) return;
-  refresh().catch(showError);
-}, 60_000);
+
 
 document.addEventListener("click", async event => {
   const button = event.target.closest("[data-external-quote]");
@@ -694,3 +709,36 @@ scheduleForm.addEventListener('submit', async event => {
   } catch (error) { scheduleError.textContent = error.message; }
   finally { button.disabled = false; }
 });
+
+function canPollState() {
+  return !document.hidden && !document.querySelector("dialog[open]")
+    && !editingTransactionId && assetForm.hidden && !savingTransaction
+    && !document.activeElement?.matches("input:not([readonly]), select, textarea:not([readonly])");
+}
+
+async function pollState(immediate = false) {
+  if (polling || explicitRefreshes || !canPollState()) return;
+  const interval = quoteScheduleState?.config ? scheduleInterval(quoteScheduleState.config) : 60;
+  // Check at least once a minute for settings changed elsewhere.
+  if (!immediate && performance.now() - lastStateRead < Math.min(interval, 60) * 1000) return;
+
+  polling = true;
+  lastStateRead = performance.now();
+  const version = explicitRefreshVersion;
+  try {
+    const state = await request("/api/state", { signal: AbortSignal.timeout(15_000) });
+    // An edit or an explicit refresh may have started while the request was in flight.
+    if (version === explicitRefreshVersion && !explicitRefreshes) {
+      if (canPollState()) applyState(state);
+      else lastStateRead = -Infinity;
+    }
+  } catch (caught) {
+    if (version === explicitRefreshVersion && canPollState()) showError(caught);
+  } finally {
+    polling = false;
+  }
+}
+
+refresh().catch(showError);
+setInterval(() => { void pollState(); }, 1000);
+document.addEventListener("visibilitychange", () => { void pollState(true); });

@@ -107,7 +107,7 @@ Prognoza używa liczby niezarchiwizowanych instrumentów ze skonfigurowanym pobi
 
 To prognoza przy pełnej taryfie i grupowaniu należnych instrumentów; nie jest licznikiem faktycznie zużytych punktów. Nie uwzględnia rabatów poza sesją, dodatkowych ręcznych pobrań, ponowień i rozdrobnienia pakietów po zmianach konfiguracji. Dla 20 instrumentów bossa i ustawień z przykładu daje **14738 pkt/dzień** (14736 za kursy + 2 za metadane), w zwykłym 24-godzinnym dniu. Jeśli prognoza jest większa niż `TOKEN_LIMIT`, obok metody wyniku pojawia się ostrzeżenie z prognozą i limitem; kliknięcie otwiera harmonogram. Ostrzeżenie nie blokuje pobierania. Twarde ograniczenia dostawcy nadal są respektowane.
 
-Endpointy: `GET /api/quote-schedule` odczytuje konfigurację, aktualny interwał i prognozę; `PUT /api/quote-schedule` zapisuje pełen obiekt `{ activityStart, activityEnd, activityFreqs, nonactivityFreqs, tokenLimit }`. `GET /api/state` zawiera ten sam stan w `quoteSchedule`. Przeglądarka nadal odświeża widok co minutę; częstotliwość serwerowego pobierania cen jest od tego niezależna.
+Endpointy: `GET /api/quote-schedule` odczytuje konfigurację, aktualny interwał i prognozę; `PUT /api/quote-schedule` zapisuje pełen obiekt `{ activityStart, activityEnd, activityFreqs, nonactivityFreqs, tokenLimit }`. `GET /api/state` zawiera ten sam stan w `quoteSchedule`. Widoczna karta odczytuje stan aplikacji w bieżącym interwale harmonogramu, co najmniej raz na minutę. Po powrocie do karty odczyt następuje od razu, jeśli użytkownik nie edytuje danych. Odczyt stanu pokazuje kursy zapisane przez kolektor serwerowy.
 
 ### bossaAPI Notowania — konfiguracja
 

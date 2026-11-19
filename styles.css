@@ -17,6 +17,7 @@
   --table-heading: #758078;
   --positive: #08783e;
   --negative: #b32929;
+  --quote-stale: #a84b00;
   --buy-background: #e9f5ed;
   --sell-text: #914022;
   --sell-background: #fff0e9;
@@ -41,6 +42,7 @@
   --table-heading: #a2b2a7;
   --positive: #71dda0;
   --negative: #ff9292;
+  --quote-stale: #ffad66;
   --buy-background: #203f2c;
   --sell-text: #ffc29f;
   --sell-background: #442d24;
@@ -118,6 +120,7 @@ button:disabled { opacity: .6; cursor: wait; }
 
 .quote-status { display: block; width: fit-content; margin-top: 6px; padding: 2px 6px; border: 1px solid currentColor; border-radius: 5px; font-size: .72rem; font-weight: 600; }
 .quote-status-success { color: var(--positive, #15803d); }
+.quote-status-stale, .quote-info-stale { color: var(--quote-stale); }
 .quote-status-warning { color: var(--muted); }
 .quote-status-error { color: var(--negative, #dc2626); }
 .external-quote-button { color: var(--text); margin-left: 5px; font-size: 1.15rem; vertical-align: middle; }
